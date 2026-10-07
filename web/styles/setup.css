@@ -1,0 +1,34 @@
+/* Setup: a very faint gear in the top-left corner, and the card it opens with
+   the bridge status, an auto-bridge button and the instructions. */
+#setup-btn { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 8; width: 40px; height: 40px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text); opacity: .11; transition: opacity .4s, transform .6s; display: grid; place-items: center; box-shadow: none; }
+#setup-btn:hover, #setup-btn:focus-visible, #setup-btn.open { opacity: .75; background: transparent; box-shadow: none; }
+#setup-btn:hover svg, #setup-btn.open svg { transform: rotate(60deg); }
+#setup-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.4; transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+#setup-btn .dot { position: absolute; right: 6px; bottom: 6px; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--red); background: transparent; transition: background .4s, box-shadow .4s; }
+#setup-btn[data-link="on"] .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+#setup-btn[data-link="probing"] .dot { animation: blink .6s steps(2) infinite; }
+#ui.hidden ~ #setup-btn, body.corrupting #setup-btn { opacity: 0; pointer-events: none; }
+
+#setup { position: fixed; top: calc(56px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 9; width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 80px - env(safe-area-inset-top)); overflow-y: auto; padding: 16px 18px 18px; background: var(--pane); border: 1px solid var(--edge); border-top-color: var(--red); box-shadow: 0 0 40px #000, inset 0 0 60px var(--inset); font-size: 12px; line-height: 1.6; color: #d8d2d2; opacity: 0; transform: translateY(-8px); pointer-events: none; transition: opacity .35s, transform .35s; user-select: text; -webkit-user-select: text; }
+#setup.on { opacity: 1; transform: none; pointer-events: auto; }
+#setup header { display: flex; justify-content: space-between; align-items: center; font-size: 10px; letter-spacing: .3em; color: var(--red); margin-bottom: 12px; }
+#setup header button { min-height: 28px; padding: 0 10px; font-size: 11px; letter-spacing: .1em; }
+#setup h2 { font-size: 10px; letter-spacing: .28em; color: var(--mute); margin: 16px 0 6px; font-weight: normal; }
+#setup .auto { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#setup .auto button { flex: 1; min-width: 180px; }
+#setup .auto button.live { animation: pulse .7s infinite alternate; }
+#setup .note { color: var(--mute); font-size: 11px; letter-spacing: .04em; }
+#setup dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 6px 0; }
+#setup dt { color: var(--mute); letter-spacing: .2em; font-size: 10px; align-self: baseline; padding-top: 2px; }
+#setup dd { color: #e8e2e2; word-break: break-all; }
+#setup dd.on { color: var(--red); text-shadow: 0 0 8px var(--red); }
+#setup form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+#setup form input { flex: 1; min-width: 120px; background: rgba(0,0,0,.6); border: 1px solid var(--edge-soft); color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; outline: none; border-radius: 2px; }
+#setup form input::placeholder { color: var(--hint); }
+#setup form input:focus { border-color: var(--red); }
+#setup form button { min-height: 34px; padding: 0 12px; font-size: 11px; }
+#setup pre { margin: 6px 0 10px; padding: 8px 10px; background: rgba(0,0,0,.55); border: 1px solid var(--edge-soft); border-left: 2px solid var(--red); color: #efe9e9; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+#setup pre b { color: var(--red); font-weight: normal; }
+#setup code { color: var(--red); font-size: 11.5px; }
+#setup p { margin: 4px 0; }
+#setup footer { margin-top: 14px; font-size: 10px; letter-spacing: .25em; color: var(--mute); text-align: right; }

@@ -1,0 +1,9 @@
+/* The session readout: the answer, typed out above the console. */
+#answer { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translate(-50%, 12px); width: min(640px, 92vw); max-height: 42vh; overflow-y: auto; z-index: 6; padding: 16px 18px 18px; background: var(--pane); border: 1px solid var(--edge); border-top-color: var(--red); box-shadow: 0 0 40px #000, inset 0 0 60px var(--inset); opacity: 0; pointer-events: none; transition: opacity .5s, transform .5s, border-color 1.5s; font-size: 14px; line-height: 1.65; color: #e3dcdc; }
+#answer.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#answer header { font-size: 10px; letter-spacing: .3em; color: var(--red); margin-bottom: 10px; display: flex; justify-content: space-between; opacity: .9; }
+#answer header span:last-child { color: var(--mute); }
+#answer .body { white-space: pre-wrap; word-break: break-word; }
+#answer .cur { display: inline-block; width: .55em; height: 1em; vertical-align: -.15em; background: var(--red); animation: blink 1s steps(2) infinite; margin-left: 2px; }
+#answer footer { margin-top: 12px; font-size: 10px; letter-spacing: .25em; color: var(--mute); text-align: right; }
+@media (max-height: 520px) { #answer { bottom: calc(128px + env(safe-area-inset-bottom)); max-height: 34vh; } }

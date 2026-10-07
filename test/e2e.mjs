@@ -114,6 +114,54 @@ async function autopilot(page, ms) {
     }
     if (won !== true) fail(name + ' did not resolve as a win when ended');
   }
+
+  // the setup gear: opens the card; a page open as a file is not linked, and the dot is hollow
+  await page.click('#setup-btn');
+  await page.waitForSelector('#setup.on', { timeout: 3000 });
+  const link0 = await page.textContent('#st-link');
+  if (!/NOT LINKED/.test(link0)) fail('setup in standalone should say NOT LINKED: ' + link0);
+  if (await page.getAttribute('#setup-btn', 'data-link') !== 'off') fail('gear dot should be off in standalone');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('setup').classList.contains('on'), null, { timeout: 3000 });
+
+  // the hidden panel: eight taps free the screws, the plate swings open, the switch turns the eye green
+  await page.evaluate(() => GK.switch.hold(7000));
+  if (await page.getAttribute('#plate', 'data-corner') !== 'tr') fail('the panel should start top-right');
+  for (let i = 0; i < 8; i++) { await page.click('#plate .door'); await sleep(130); }
+  await page.waitForFunction(() => document.getElementById('plate').dataset.stage === 'open', null, { timeout: 5000 });
+  const st1 = await page.evaluate(() => ({ ...GK.switch.state(), mood: GK.eye.mood(), line: document.getElementById('line').textContent }));
+  if (st1.screw !== 4 || st1.taps !== 8) fail('screws: ' + JSON.stringify(st1));
+  if (!['fear', 'angry'].includes(st1.mood)) fail('the eye should object to the panel, mood was ' + st1.mood);
+  console.log('panel open:', st1.mood, JSON.stringify(st1.line));
+  await page.screenshot({ path: join(OUT, 'panel-open.png') });
+  await page.click('#switch');
+  await page.waitForFunction(() => document.body.classList.contains('friendly') && GK.eye.tint() === 'green' && document.getElementById('switch').classList.contains('on'), null, { timeout: 5000 });
+  const st2 = await page.evaluate(() => ({ friendly: GK.switch.friendly(), warm: GK.audio.warm(), tone: GK.voice.tone(), gate: GK.gate && true, stage: GK.switch.state().stage }));
+  if (!(st2.friendly && st2.warm && st2.tone === 'kind' && st2.stage === 'on')) fail('friendly mode did not take: ' + JSON.stringify(st2));
+  await sleep(2000); await page.screenshot({ path: join(OUT, 'friendly.png') });
+  // friendly: no trial, the answer comes at once, and the stamp says so
+  await page.evaluate(() => { window.__stageSeen = false; new MutationObserver(() => { if (document.getElementById('stage').classList.contains('on')) window.__stageSeen = true; }).observe(document.getElementById('stage'), { attributes: true }); });
+  await page.fill('#q', 'where are the tests?'); await page.press('#q', 'Enter');
+  await page.waitForSelector('#answer.on', { timeout: 20000 });
+  await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
+  const kindStamp = await page.textContent('#astamp'), kindText = await page.textContent('#abody');
+  if (await page.evaluate(() => window.__stageSeen)) fail('a trial ran while friendly');
+  if (!/UNGATED/.test(kindStamp)) fail('friendly stamp: ' + kindStamp);
+  if (!/214 tests/.test(kindText)) fail('friendly answer: ' + kindText);
+  console.log('friendly:', kindStamp, '|', await page.textContent('#line'));
+  // it does not last: the corruption takes it back and the panel hides in another corner
+  await page.waitForFunction(() => !document.body.classList.contains('friendly') && GK.eye.tint() === 'red' && !GK.switch.friendly(), null, { timeout: 45000 });
+  await page.waitForFunction(() => { const p = document.getElementById('plate'); return p.dataset.stage === 'hidden' && GK.switch.state().corner !== 'tr' && !p.classList.contains('gone'); }, null, { timeout: 20000 });
+  const st3 = await page.evaluate(() => ({ ...GK.switch.state(), tone: GK.voice.tone(), warm: GK.audio.warm(), sw: document.getElementById('switch').className, body: document.body.className }));
+  if (st3.tone !== 'demon' || st3.warm || st3.screw !== 0 || /on/.test(st3.sw) || /friendly|corrupting/.test(st3.body)) fail('corruption left state behind: ' + JSON.stringify(st3));
+  console.log('corrupted; the panel is now', st3.corner);
+  await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 20000 });
+  await page.screenshot({ path: join(OUT, 'corrupted.png') });
+  // the trials are back
+  await page.fill('#q', 'how does auth work?'); await page.press('#q', 'Enter');
+  await page.waitForSelector('#stage.on', { timeout: 15000 });
+  await page.evaluate(() => GK.arena.end(false));
+  await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 30000 });
   await page.close();
 }
 
@@ -121,7 +169,10 @@ async function autopilot(page, ms) {
 {
   const port = 3900 + Math.floor(Math.random() * 90);
   const server = spawn(process.execPath, [join(root, 'server.mjs')], { env: { ...process.env, ORACLE: 'mock', PORT: String(port), REPO: root }, stdio: ['ignore', 'pipe', 'inherit'] });
+  let serverLog = '';
+  server.stdout.on('data', d => { serverLog += d; });
   await new Promise(r => server.stdout.on('data', d => { if (/gatekeeper on/.test(d)) r(); }));
+  const asksSeen = () => (serverLog.match(/\] ask \(mock/g) || []).length;
   try {
     const page = await newPage();
     await page.goto(`http://127.0.0.1:${port}/`);
@@ -139,7 +190,35 @@ async function autopilot(page, ms) {
     if (!/src\/auth/.test(text)) fail('bridge answer missing: ' + text);
     if (!/^MOCK · SESSION/.test(stamp)) fail('bridge stamp: ' + stamp);
     console.log('bridge:', stamp, '| line during stream:', JSON.stringify(lineDuring), '|', text.slice(0, 50) + '…');
+    // the setup card reports the bridge, and the gear's dot is lit
+    await page.click('#setup-btn'); await page.waitForSelector('#setup.on', { timeout: 3000 });
+    const link = await page.textContent('#st-link'), oracle = await page.textContent('#st-oracle'), repo = await page.textContent('#st-repo');
+    if (link !== 'LINKED' || !/MOCK/.test(oracle) || repo !== 'the-eye') fail(`setup status on the bridge: ${link} / ${oracle} / ${repo}`);
+    if (await page.getAttribute('#setup-btn', 'data-link') !== 'on') fail('gear dot should be on when bridged');
+    await page.screenshot({ path: join(OUT, 'setup.png') });
     await page.close();
+
+    // 3. a page opened as a file finds the bridge through the setup card's button, remembers it, and asks through it
+    const p3 = await newPage();
+    await p3.goto('file://' + join(root, 'index.html'));
+    await p3.click('#wake'); await sleep(2800);
+    if (await p3.evaluate(() => GK.config.linked)) fail('a file page should not be linked before bridging');
+    const before = asksSeen();
+    const r = await p3.evaluate(port => GK.setup.autoBridge([`http://127.0.0.1:${port}`]), port);
+    if (!r || !r.ok) fail('auto-bridge failed: ' + JSON.stringify(r));
+    if (await p3.getAttribute('#setup-btn', 'data-link') !== 'on') fail('gear dot should light after auto-bridge');
+    const remembered = await p3.evaluate(() => JSON.parse(localStorage.getItem('gatekeeper.api') || 'null'));
+    if (!remembered || !String(remembered.api).includes(String(port))) fail('bridge not remembered: ' + JSON.stringify(remembered));
+    await p3.fill('#q', 'where are the tests?'); await p3.press('#q', 'Enter');
+    await p3.waitForSelector('#stage.on', { timeout: 15000 }); await sleep(1500);
+    await p3.evaluate(() => GK.arena.end(true));
+    await p3.waitForSelector('#answer.on', { timeout: 20000 });
+    await p3.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
+    const stamp3 = await p3.textContent('#astamp');
+    if (!/^MOCK · SESSION/.test(stamp3)) fail('auto-bridged stamp: ' + stamp3);
+    if (asksSeen() !== before + 1) fail(`the question did not reach the bridge (${before} -> ${asksSeen()})`);
+    console.log('auto-bridge:', r.api, '|', stamp3, '| asks at the bridge:', asksSeen());
+    await p3.close();
   } finally { server.kill(); }
 }
 

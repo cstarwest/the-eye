@@ -1,0 +1,16 @@
+/* The bottom console: waveform, subtitle line, question field and buttons. */
+#ui { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; align-items: center; transition: opacity .4s; }
+#ui.hidden { opacity: 0; pointer-events: none; }
+#wave { width: min(440px, 84vw); height: 28px; display: block; }
+#line { min-height: 1.5em; max-width: min(640px, 92vw); font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--red); text-align: center; opacity: .9; text-shadow: 0 0 10px var(--red), 0 0 2px #fff3; line-height: 1.5; transition: color 1.5s, text-shadow 1.5s; }
+#line .cur { display: inline-block; width: .6em; height: 1em; vertical-align: -.15em; background: var(--red); animation: blink 1s steps(2) infinite; margin-left: 2px; }
+@keyframes blink { to { opacity: 0 } }
+#controls { display: flex; gap: 8px; width: min(560px, 92vw); }
+#q { flex: 1; min-width: 0; background: rgba(0,0,0,.6); border: 1px solid var(--edge-soft); color: var(--text); padding: 12px 14px; font: inherit; font-size: 14px; outline: none; border-radius: 2px; transition: border-color .2s, box-shadow .2s; }
+#q::placeholder { color: var(--hint); letter-spacing: .08em; }
+#q:focus { border-color: var(--red); box-shadow: 0 0 14px var(--dim), inset 0 0 20px var(--inset); }
+button { background: transparent; border: 1px solid var(--edge); color: var(--red); padding: 0 16px; min-height: 44px; font: inherit; font-size: 12px; letter-spacing: .18em; cursor: pointer; border-radius: 2px; transition: all .15s; }
+button:hover, button:active { background: var(--dim); box-shadow: 0 0 14px var(--red); }
+button:disabled { opacity: .35; cursor: default; box-shadow: none; background: transparent; }
+button.live { background: var(--red); color: #000; animation: pulse .7s infinite alternate; }
+@keyframes pulse { to { box-shadow: 0 0 28px var(--red), 0 0 60px var(--dim) } }

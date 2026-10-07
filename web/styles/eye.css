@@ -1,0 +1,10 @@
+/* The eye canvas and the film layers over it. */
+#eye { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.55) 70%, #000 100%); transition: opacity 2s; }
+#scan { position: fixed; inset: 0; pointer-events: none; opacity: .22; background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.65) 2px 3px); transition: opacity 2s; }
+body.friendly #scan { opacity: .1; }
+body.friendly #vignette { opacity: .7; }
+#glitch { position: fixed; inset: 0; z-index: 20; pointer-events: none; display: none; mix-blend-mode: screen; }
+#glitch.on { display: block; animation: gl .5s steps(7) forwards; background: repeating-linear-gradient(0deg, var(--red) 0 3px, #000 3px 9px, #fff 9px 10px); }
+@keyframes gl { 0% { opacity: .9; transform: translateY(0) } 50% { opacity: .6; transform: translateY(18px) skewX(-6deg) } 100% { opacity: 0; transform: translateY(-40px) skewX(8deg) } }
+@media (prefers-reduced-motion: reduce) { #glitch.on { animation-duration: .25s } }

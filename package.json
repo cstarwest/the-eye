@@ -2,7 +2,7 @@
   "name": "gatekeeper-eye",
   "version": "1.0.0",
   "private": true,
-  "description": "A red eye that guards a Claude session. Single-file page plus an optional bridge to Claude Code or the Claude API.",
+  "description": "A red eye that guards a Claude session. A static page (no build step) plus an optional bridge to Claude Code or the Claude API.",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
