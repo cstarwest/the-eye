@@ -181,6 +181,9 @@ async function autopilot(page, ms) {
     const x1 = s.x; g.step(s, .05); return blurOk && s.x === x1;
   });
   if (!keysLetGo) fail('a key stayed held after blur or a Shift release');
+  // stopping the voice ends the line in progress, even one that is only timed (no system voice)
+  const stopped = await page.evaluate(() => { const t0 = performance.now(), p = GK.voice.say('A line long enough to run for several seconds if nothing stops it.', { hold: 0 }); GK.voice.stop(); return p.then(() => performance.now() - t0); });
+  if (!(stopped < 1000)) fail('Voice.stop() did not end the line: it ran ' + Math.round(stopped) + 'ms');
 
   // the setup gear: opens the card; with no Claude Code the mock answers, and the dot is hollow
   await page.click('#setup-btn');
