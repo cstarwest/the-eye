@@ -69,9 +69,11 @@ const Switch = (() => {
     stage = 'open'; plate.dataset.stage = stage; Gate.touch();
     Audio_.sfx.creak(); buzz([20, 30, 20]); Gate.glitch();
     Eye.look(at()); later(() => Eye.look(null), 1800);
+    if (!Gate.busy()) Eye.setMood('fear');                            // the moment it swings open, not after the last line
     Bus.emit('switch', state());
     await wait(500);
-    say(pick(OPENED), 'fear');
+    for (let n = 0; talking && n < 100; n++) await wait(100);        // a line about the screws may still be running: let it end, then speak
+    if (stage === 'open') say(pick(OPENED), 'fear');
   }
 
   // ---- the switch

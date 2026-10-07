@@ -10,7 +10,7 @@
 // 'kind', used while the hidden switch holds: normal pitch, no growl, a soft
 // hum underneath, no static in the subtitles.
 const Voice = (() => {
-  let speaking = false, voices = [], tone = 'demon';
+  let speaking = false, voices = [], tone = 'demon', ending = null;   // ending: how to end the line being said
   const TONES = { demon: { pitch: 0.15, rate: 0.8 }, kind: { pitch: 1.0, rate: 0.95 } };
   const lineEl = $('line');
   const hasTTS = 'speechSynthesis' in window;
@@ -118,10 +118,11 @@ const Voice = (() => {
       const render = (n, final) => { if (!silent) renderLine(text, n, final, el, plain); };
       let shown = 0, done = false, began = false, timer = 0, keep = 0, g = null;
       const finish = () => {
-        if (done) return; done = true; speaking = false;
+        if (done) return; done = true; speaking = false; if (ending === finish) ending = null;
         clearInterval(timer); clearInterval(keep); g && g.end(); render(total, true);
         setTimeout(res, opts.hold ?? 300);
       };
+      ending = finish;
       const start = () => {
         if (began) return; began = true;
         g = tone === 'kind' ? hum(ms) : growl(ms);
@@ -143,10 +144,13 @@ const Voice = (() => {
       setTimeout(() => !done && finish(), ms * 2.5 + 5000);                                 // hard cap
     });
   }
-  function stop() { if (hasTTS) speechSynthesis.cancel(); }
+  // stop() ends the line being said, spoken or (with no system voice) only timed
+  function stop() { if (hasTTS) speechSynthesis.cancel(); if (ending) ending(); }
   function setTone(name) { tone = TONES[name] ? name : 'demon'; Object.assign(CONFIG.voice, TONES[tone]); }
 
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Electron has no speech-recognition service behind this API (Chrome's is Google's,
+  // keyed to Chrome), so the desktop app hides MIC and the question is typed.
+  const SR = CONFIG.desktop ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
   function listen(onInterim) {
     return new Promise(res => {
       if (!SR) return res(null);

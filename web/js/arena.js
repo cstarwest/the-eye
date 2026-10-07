@@ -25,14 +25,18 @@ const Arena = (() => {
   // Discrete inputs since the last frame, as directions: 0 up · 1 right · 2 down · 3 left
   // (arrows / WASD, or a tap, read by its quadrant around the centre of the arena).
   let taps = [];
-  const DIRS = { ArrowUp: 0, w: 0, W: 0, ArrowRight: 1, d: 1, D: 1, ArrowDown: 2, s: 2, S: 2, ArrowLeft: 3, a: 3, A: 3 };
+  const DIRS = { ArrowUp: 0, w: 0, ArrowRight: 1, d: 1, ArrowDown: 2, s: 2, ArrowLeft: 3, a: 3 };
+  // letters are kept lower-case, so a key pressed as 'a' and released as 'A' (Shift in between) is still released
+  const keyOf = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
   addEventListener('keydown', e => {
-    keys[e.key] = true;
+    const k = keyOf(e); keys[k] = true;
     if (!stage.classList.contains('on')) return;
-    if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
-    if (!e.repeat && e.key in DIRS) taps.push(DIRS[e.key]);
+    if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
+    if (!e.repeat && k in DIRS) taps.push(DIRS[k]);
   });
-  addEventListener('keyup', e => { keys[e.key] = false; });
+  addEventListener('keyup', e => { keys[keyOf(e)] = false; });
+  // a window that loses focus never hears the key or button come up: let go of everything
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointerX = null; });
   const toLocal = e => { const r = gc.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width * GW, 0, GW), y: clamp((e.clientY - r.top) / r.height * GH, 0, GH) }; };
   stage.addEventListener('pointerdown', e => { const p = toLocal(e), dx = p.x - GW / 2, dy = p.y - GH / 2; pointerX = p.x; keys.fire = true; taps.push(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)); });
   stage.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toLocal(e).x; });
@@ -66,8 +70,8 @@ const Arena = (() => {
   const setSpeed = (b, v) => { const m = Math.hypot(b.vx, b.vy) || 1; b.vx *= v / m; b.vy *= v / m; };
   const paddleInput = (x, w, speed, dt) => {
     if (pointerX !== null) return clamp(pointerX - w / 2, 0, GW - w);
-    if (keys.ArrowLeft || keys.a || keys.A) x -= speed * dt;
-    if (keys.ArrowRight || keys.d || keys.D) x += speed * dt;
+    if (keys.ArrowLeft || keys.a) x -= speed * dt;
+    if (keys.ArrowRight || keys.d) x += speed * dt;
     return clamp(x, 0, GW - w);
   };
   const firing = () => !!(keys[' '] || keys.ArrowUp || keys.w || keys.fire || pointerX !== null);

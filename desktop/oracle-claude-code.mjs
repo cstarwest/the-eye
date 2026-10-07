@@ -8,7 +8,7 @@ import { PERSONA } from './persona.mjs';
 const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git show:*)', 'Bash(git blame:*)'];
 
 export function createClaudeCodeOracle(cfg) {
-  const bin = cfg.claudeBin || 'claude';
+  const bin = cfg.claudeBin || 'claude', pre = cfg.claudeArgs || [];   // pre: e.g. cli.js when claude runs under node
   const tools = cfg.claudeTools?.length ? cfg.claudeTools : DEFAULT_TOOLS;
   const sessions = new Map();   // page session -> claude session id
   return {
@@ -17,7 +17,7 @@ export function createClaudeCodeOracle(cfg) {
     forget: session => sessions.delete(session),
     ask({ question, session, emit, signal }) {
       return new Promise((resolve, reject) => {
-        const args = ['-p', question, '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+        const args = [...pre, '-p', question, '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
           '--max-turns', String(cfg.maxTurns || 12), '--append-system-prompt', PERSONA, '--allowedTools', ...tools];
         if (cfg.model) args.push('--model', cfg.model);
         if (cfg.mcpConfig) args.push('--mcp-config', cfg.mcpConfig);
@@ -25,14 +25,14 @@ export function createClaudeCodeOracle(cfg) {
         const prior = sessions.get(session);
         if (prior) args.push('--resume', prior);
         const env = { ...process.env }; delete env.CLAUDECODE;   // allow launching from inside another Claude Code session
-        const child = spawn(bin, args, { cwd: cfg.repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(bin, args, { cwd: cfg.repo, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
         let streamed = '', assistantText = '', resultText = null, isError = false, stderr = '', sawTextBlock = false, settled = false;
         const finish = (err, answer) => { if (settled) return; settled = true; clearTimeout(timer); err ? reject(err) : resolve({ answer }); };
         const timer = setTimeout(() => { child.kill(); finish(new Error('the session took too long')); }, cfg.timeoutMs || 300_000);
         const onAbort = () => { child.kill(); finish(new Error('aborted')); };
         signal?.addEventListener('abort', onAbort, { once: true });
         child.stderr.on('data', d => { if (stderr.length < 4000) stderr += d; });
-        child.on('error', e => finish(e.code === 'ENOENT' ? new Error(`cannot find the claude command (${bin}); install Claude Code or set CLAUDE_BIN`) : e));
+        child.on('error', e => finish(e.code === 'ENOENT' ? new Error(`cannot find the claude command (${bin}); install Claude Code or set CLAUDE_BIN or "claudeBin" in the settings file`) : e));
         const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
         rl.on('line', line => {
           let obj; try { obj = JSON.parse(line); } catch { return; }
@@ -88,4 +88,4 @@ function describeTool(b) {
   if (n.startsWith('mcp__')) return n.replace(/^mcp__/, '').replace(/__/g, ': ').toUpperCase();
   return n.toUpperCase();
 }
-const short = p => String(p).split('/').slice(-3).join('/');
+const short = p => String(p).split(/[\\/]/).slice(-3).join('/');

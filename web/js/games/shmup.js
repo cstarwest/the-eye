@@ -22,7 +22,9 @@ Arena.define(({ GW, GH, px, text, sprite, burst, shake, flash, note, paddleInput
         for (let i = 0; i < n; i++) s.foes.push(line ? { x: dir > 0 ? -10 - i * 14 : GW + 1 + i * 14, y: rnd(-6, 10), vx: dir * (55 + k * 6) * pace, f: i, dive: 0, line: 1 } : { x: rnd(2, GW - 11), y: -10 - i * 14, vx: rnd(-1, 1) * (40 + k * 6) * pace, f: Math.random() * 10, dive: 0 });
         s.spawn = Math.max(.28, .6 - k * .05) / (1 + s.lvl * .02);
       }
-      s.shots.forEach(p => p.y -= 250 * dt); s.shots = s.shots.filter(p => p.y > -4);
+      // everything that flies remembers where it was a frame ago (py), and is tested along the way it
+      // came, so a slow frame (a shot moves up to 12px in one) cannot carry it through a target
+      s.shots.forEach(p => { p.py = p.y; p.y -= 250 * dt; }); s.shots = s.shots.filter(p => p.y > -4);
       for (const f of s.foes) {
         if (!f.dive && armed && f.y > 30 && Math.random() < .003 + prog * .01) { f.dive = 1; Audio_.sfx.blip(); }
         if (f.dive) { f.y += (120 + k * 6) * pace * dt; f.x += clamp((s.x - f.x) * 3, -80, 80) * dt; }
@@ -33,9 +35,9 @@ Arena.define(({ GW, GH, px, text, sprite, burst, shake, flash, note, paddleInput
           if (armed && Math.random() < .006 + k * .0015) s.eshots.push({ x: f.x + 4, y: f.y + 8, vx: clamp((s.x - f.x) / 1.5, -65, 65), vy: (110 + k * 5) * pace });
         }
       }
-      s.eshots.forEach(p => { p.y += p.vy * dt; p.x += p.vx * dt; }); s.eshots = s.eshots.filter(p => p.y < GH && p.x > -3 && p.x < GW + 3);
+      s.eshots.forEach(p => { p.py = p.y; p.y += p.vy * dt; p.x += p.vx * dt; }); s.eshots = s.eshots.filter(p => p.y < GH && p.x > -3 && p.x < GW + 3);
       let kills = 0;
-      for (const f of s.foes) for (const p of s.shots) if (!f.d && p.y > -1 && p.x > f.x - 1 && p.x < f.x + 10 && p.y > f.y && p.y < f.y + 8) { f.d = 1; p.y = -99; kills++; burst(f.x + 4, f.y + 4, 8); Audio_.sfx.kill(); }
+      for (const f of s.foes) for (const p of s.shots) if (!f.d && f.y > -4 && p.y > -1 && p.x > f.x - 1 && p.x < f.x + 10 && p.y < f.y + 8 && p.py > f.y) { f.d = 1; p.y = -99; kills++; burst(f.x + 4, f.y + 4, 8); Audio_.sfx.kill(); }
       if (kills) {
         s.kills += kills; s.combo = s.comboT > 0 ? s.combo + kills : kills; s.comboT = .55; if (s.combo >= 3) shake(.12);
         if (!s.twin && s.kills >= s.need / 2) { s.twin = true; note(s, 'TWIN CANNON'); Audio_.sfx.smash(); }
@@ -52,10 +54,10 @@ Arena.define(({ GW, GH, px, text, sprite, burst, shake, flash, note, paddleInput
           if (Math.random() < .5) s.foes.push({ x: cx - 4, y: cy, vx: rnd(-1, 1) * 50, f: 0, dive: 0 });
           B.cd = Math.max(.4, 1 - rage * .55) / pace; Audio_.sfx.shoot();
         }
-        for (const p of s.shots) if (p.y > -1 && p.y > B.y && p.y < B.y + 13 && p.x > B.x && p.x < B.x + 25) { p.y = -99; B.hp--; B.hurt = .07; burst(p.x, B.y + 13, 3); Audio_.sfx.hit(); }
+        for (const p of s.shots) if (p.y > -1 && p.y < B.y + 13 && p.py > B.y && p.x > B.x && p.x < B.x + 25) { p.y = -99; B.hp--; B.hurt = .07; burst(p.x, B.y + 13, 3); Audio_.sfx.hit(); }
         if (B.hp <= 0) { burst(B.x + 12, B.y + 6, 50, 110); shake(.6); flash(); return true; }
       }
-      const hit = s.eshots.some(p => p.x > s.x - 1 && p.x < s.x + 9 && p.y > GH - 20 && p.y < GH - 12) || s.foes.some(f => f.y + 8 > GH - 20 && f.y < GH - 12 && f.x < s.x + 8 && f.x + 9 > s.x);
+      const hit = s.eshots.some(p => p.x > s.x - 1 && p.x < s.x + 9 && p.y > GH - 20 && (p.py ?? p.y) < GH - 12) || s.foes.some(f => f.y + 8 > GH - 20 && f.y < GH - 12 && f.x < s.x + 8 && f.x + 9 > s.x);
       if (hit && s.inv <= 0) { s.lives--; s.inv = 1.4; flash(); shake(.3); Audio_.sfx.hurt(); burst(s.x + 4, GH - 15, 12); s.eshots = []; if (!s.lives) { s.why = B ? 'THE WARDEN STANDS' : 'TAKEN BY THE SWARM'; return false; } }
       s.heat = B ? .7 + .3 * (1 - B.hp / B.max) : prog * .65; s.danger = s.lives === 1 || (!!B && B.hp <= 2);
     },

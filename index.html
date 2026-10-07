@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#050505">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' data: blob:; connect-src 'none'">
 <title>GATEKEEPER</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23050505'/%3E%3Ccircle cx='32' cy='32' r='18' fill='%23c01010'/%3E%3Cellipse cx='32' cy='32' rx='4' ry='12'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="web/styles/base.css">
@@ -46,40 +47,28 @@
 <section id="setup" aria-label="Setup">
   <header><span>SETUP · BRIDGE TO CLAUDE</span><button id="setup-close" aria-label="Close">×</button></header>
   <div class="auto">
-    <button id="bridge-auto">BRIDGE TO CLAUDE</button>
-    <span class="note">Looks for a bridge on this page's origin, then on localhost:3000.</span>
+    <button id="bridge-auto">FIND CLAUDE CODE</button>
+    <button id="bridge-repo">CHOOSE REPOSITORY</button>
   </div>
   <p class="note" id="bridge-result"></p>
 
   <h2>STATUS</h2>
   <dl>
     <dt>LINK</dt><dd id="st-link"></dd>
-    <dt>BRIDGE</dt><dd id="st-api"></dd>
     <dt>ORACLE</dt><dd id="st-oracle"></dd>
+    <dt>CLAUDE CODE</dt><dd id="st-claude"></dd>
     <dt>MODEL</dt><dd id="st-model"></dd>
     <dt>REPO</dt><dd id="st-repo"></dd>
     <dt>SESSION</dt><dd id="st-session"></dd>
-    <dt>LAST PROBE</dt><dd id="st-probe"></dd>
+    <dt>LAST CHECK</dt><dd id="st-probe"></dd>
   </dl>
 
-  <h2>ANOTHER BRIDGE</h2>
-  <form id="bridge-form">
-    <input id="bridge-url" type="text" placeholder="http://localhost:3000" autocomplete="off" spellcheck="false" aria-label="Bridge address">
-    <input id="bridge-key" type="password" placeholder="secret, if set" autocomplete="off" aria-label="Bridge secret">
-    <button type="submit">CONNECT</button>
-    <button type="button" id="bridge-forget">FORGET</button>
-  </form>
-  <p class="note">A bridge you connect to here is remembered in this browser.</p>
-
-  <h2>STARTING A BRIDGE</h2>
-  <p>The page answers from a mock until a bridge is linked. The bridge is a small Node server in this repository; it reads your repository through Claude Code or the Claude API.</p>
-  <pre><b>npm install</b>
-<b>node server.mjs</b>                 # serves this page and picks an oracle
-<b>REPO=/path/to/repo node server.mjs</b>   # the repository it reads</pre>
-  <p>Oracles: <b>claude-code</b> when the <code>claude</code> CLI is installed and logged in; <b>api</b> when <code>ANTHROPIC_API_KEY</code> is set; <b>mock</b> otherwise. Force one with <code>ORACLE=</code>.</p>
-  <pre><b>ORACLE=api ANTHROPIC_API_KEY=sk-ant-… node server.mjs</b>
-<b>ORACLE=claude-code CLAUDE_PERMISSION_MODE=plan node server.mjs</b></pre>
-  <p>Open the page the bridge serves (<code>http://localhost:3000</code>) and it links itself. Any other copy of the page links with <code>?api=http://localhost:3000</code>, or from here. For a remote bridge, set <code>GATEKEEPER_SECRET</code> on the server and enter it above.</p>
+  <h2>HOW IT CONNECTS</h2>
+  <p>The app runs Claude Code on this computer, in the repository you choose, with read-only tools. Nothing is served and no browser is involved.</p>
+  <p>If Claude Code is not found, install it, run <code>claude</code> once in a terminal to sign in, then press FIND CLAUDE CODE.</p>
+  <pre><b>curl -fsSL https://claude.ai/install.sh | bash</b>
+<b>npm install -g @anthropic-ai/claude-code</b>   # or this</pre>
+  <p>To answer through the Claude API instead, set <code>ANTHROPIC_API_KEY</code> in your shell profile, or <code>"oracle": "api"</code> in the settings file (File → Open Settings File). Without either, a mock answers.</p>
   <footer>ESC · CLICK OUTSIDE TO CLOSE</footer>
 </section>
 
@@ -94,7 +83,7 @@
 
 <div id="stage"><div id="gtitle"></div><canvas id="gc"></canvas><div id="ghelp"></div></div>
 
-<!-- plain scripts, in dependency order; no build step, works from file:// -->
+<!-- plain scripts, in dependency order; no build step. The desktop app loads this file from disk (desktop/main.mjs) -->
 <script src="web/js/config.js"></script>
 <script src="web/js/audio.js"></script>
 <script src="web/js/voice.js"></script>

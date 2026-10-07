@@ -35,7 +35,7 @@ const Gate = (() => {
   function hideAnswer() { answer.classList.remove('on'); }
   function showAnswer() {
     renderReadout('', false);
-    $('astamp').textContent = `${CONFIG.oracle || (CONFIG.api !== null ? 'LIVE' : 'MOCK')} · SESSION ${CONFIG.session.toUpperCase()}${friendly ? ' · UNGATED' : ''}`;
+    $('astamp').textContent = `${CONFIG.oracle || 'NO ORACLE'} · SESSION ${CONFIG.session.toUpperCase()}${friendly ? ' · UNGATED' : ''}`;
     answer.classList.add('on');
   }
   function renderReadout(text, final) {

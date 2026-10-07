@@ -1,8 +1,8 @@
 # Gatekeeper Eye
 
-A full-screen, dark, red eye guards a Claude session. Ask it something by typing or speaking; it taunts you in a deep, distorted voice, drops you into a one-bit pixel game under a dark synth drone and a driving beat, and only answers if you win. A trial is a handful of seconds, enough for a few meaningful moves, and each game remembers how often you have beaten it and tightens a little every time. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
+A full-screen, dark, red eye guards a Claude session. Ask it something; it taunts you in a deep, distorted voice, drops you into a one-bit pixel game under a dark synth drone and a driving beat, and only answers if you win. A trial is a handful of seconds, enough for a few meaningful moves, and each game remembers how often you have beaten it and tightens a little every time. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
 
-The page is plain HTML, CSS and scripts with no build step, no dependency, no audio file and no image: the eye, the voice layer, the music and the games are all generated in the browser. The bridge that connects it to Claude is a small Node server.
+It is a desktop app (Electron) for macOS, Windows and Linux. If Claude Code is installed on the same machine, the app finds it and answers through it, with nothing to configure and nothing served: no port, no browser, no web page. The window is plain HTML, CSS and scripts with no build step, no audio file and no image: the eye, the voice layer, the music and the games are all generated in it. The bridge to Claude runs in the app's main process and the window reaches it only through a small IPC surface.
 
 Somewhere on the page there is a panel that was not meant to be opened.
 
@@ -10,19 +10,37 @@ Somewhere on the page there is a panel that was not meant to be opened.
 
 ```sh
 npm install
-node server.mjs            # serves the page and picks an oracle (see below)
-# open http://localhost:3000 and tap once
+npm start                      # opens the app; it reads this checkout unless you choose another repository
+npm start -- /path/to/repo     # or point it at one (remembered)
 ```
 
-Without a bridge, the page still works on its own: open `index.html` directly and a mock oracle answers in character.
+Tap once to wake the eye. With Claude Code installed and signed in (`claude` has been run once in a terminal), the gear's dot is lit and the answers come from Claude Code reading your repository. Without it, a mock answers in character and the games still work.
+
+To build an installable app (a `.dmg`, an NSIS installer or an AppImage, for the platform you build on):
+
+```sh
+npm run dist                   # output in dist/
+```
+
+The packaged app asks for a repository the first time it wakes (File → Choose Repository…, or ⌘O / Ctrl+O, or `gatekeeper /path/to/repo` from a terminal) and remembers it.
 
 ### The gear
 
-A very faint gear sits in the top-left corner once the eye is awake. It opens the setup card: whether the page is bridged to a real Claude (the gear's dot is filled when it is, hollow when the mock answers), which oracle, model and repository the bridge reports, the session id, and what the last probe said. At the top of the card, **BRIDGE TO CLAUDE** finds a bridge on its own: the page's own origin first, then `localhost:3000` and `127.0.0.1:3000`. Below it you can enter any other bridge address and its secret; a bridge connected this way is remembered in the browser and probed again on the next visit. The rest of the card is the short version of this README: how to start a bridge and pick an oracle.
+A very faint gear sits in the top-left corner once the eye is awake. It opens the setup card: whether a real Claude is linked (the gear's dot is filled when it is, hollow when the mock answers), which oracle, which Claude Code (version and path), which model and repository, the session id, and what the bridge last said about itself. **FIND CLAUDE CODE** looks for it again, after you install it or sign in, without restarting; **CHOOSE REPOSITORY** opens the folder picker. The card opens by itself when a repository has to be chosen before Claude can answer.
+
+### How it finds Claude Code
+
+An app opened from the Dock, the Start menu or a desktop launcher does not inherit your terminal's PATH, so the app asks your login shell for its PATH (and any `ANTHROPIC_*` variables) once at startup, then looks for `claude`:
+
+1. `CLAUDE_BIN` (or `"claudeBin"` in the settings file), when set
+2. `claude` on PATH (on Windows `claude.exe`, then `claude.cmd`)
+3. the usual install locations: `~/.local/bin` (the native installer), `~/.claude/local`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`; on Windows `%USERPROFILE%\.local\bin\claude.exe` and `%APPDATA%\npm\claude.cmd`
+
+The first one that answers `--version` is used. On Windows, an npm `claude.cmd` shim is followed to the `claude.exe` (or `cli.js`) it starts, so the question is never passed through a shell.
 
 ## The oracles
 
-The bridge answers `POST /ask` through one of three oracles. It picks one automatically, or set `ORACLE=`:
+The bridge answers through one of three oracles. It picks one automatically, or set `ORACLE=` (or `"oracle"` in the settings file):
 
 | Oracle | What answers | Needs |
 |---|---|---|
@@ -30,55 +48,52 @@ The bridge answers `POST /ask` through one of three oracles. It picks one automa
 | `api` | The Claude API (`claude-opus-5-5`, streaming, adaptive thinking, server-side refusal fallback) with built-in read-only repository tools and your MCP servers | `ANTHROPIC_API_KEY`, or `ant auth login` |
 | `mock` | Canned answers, no model | nothing |
 
-Auto-pick: `api` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_PROFILE` is set; else `claude-code` when `claude` is on the PATH; else `mock`.
+Auto-pick: `claude-code` when Claude Code is found; else `api` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_PROFILE` is set; else `mock`.
 
 ```sh
-REPO=/path/to/your/repo node server.mjs                       # Claude Code reads that repo
-ORACLE=api ANTHROPIC_API_KEY=sk-ant-... REPO=/path node server.mjs
+ORACLE=api ANTHROPIC_API_KEY=sk-ant-... npm start -- /path/to/repo
 ```
 
-### Environment
+### Settings
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `PORT` | `3000` | |
-| `REPO` | current directory | the repository the gatekeeper reads |
-| `GATEKEEPER_SECRET` | unset | when set, requests must carry it in an `x-gatekeeper-key` header (the page sends `?key=`) |
-| `ORACLE` | auto | `claude-code`, `api` or `mock` |
-| `MODEL` | Claude Code's default / `claude-opus-5-5` | model for the chosen oracle |
-| `EFFORT` | `medium` | `api` only: `low`, `medium`, `high`, `xhigh`, `max` |
-| `MAX_TURNS` | `12` | tool-use turns per question |
-| `MCP_CONFIG` | `./mcp.json` if present | MCP servers (see below) |
-| `COMPACT` | off | `api` only: `1` enables server-side compaction of long conversations instead of starting over |
-| `CLAUDE_BIN` | `claude` | path to the Claude Code CLI |
-| `CLAUDE_TOOLS` | `Read Glob Grep Bash(git log:*) …` | `claude-code` only: `--allowedTools` list |
-| `CLAUDE_PERMISSION_MODE` | unset | `claude-code` only: passed as `--permission-mode` |
-| `TIMEOUT_MS` | `300000` | `claude-code` only: per-question limit |
+The app keeps a settings file in its user-data folder (File → Open Settings File): `~/Library/Application Support/Gatekeeper/settings.json` on macOS, `%APPDATA%\Gatekeeper\settings.json` on Windows, `~/.config/Gatekeeper/settings.json` on Linux. The repository you choose is saved there; everything else is optional. An environment variable of the same meaning wins for that launch.
+
+| Setting | Variable | Default | Meaning |
+|---|---|---|---|
+| `repo` | `REPO` | this checkout (`npm start`); asked for (packaged app) | the repository the gatekeeper reads |
+| `oracle` | `ORACLE` | auto | `claude-code`, `api` or `mock` |
+| `model` | `MODEL` | Claude Code's default / `claude-opus-5-5` | model for the chosen oracle |
+| `effort` | `EFFORT` | `medium` | `api` only: `low`, `medium`, `high`, `xhigh`, `max` |
+| `maxTurns` | `MAX_TURNS` | `12` | tool-use turns per question |
+| `mcpConfig` | `MCP_CONFIG` | `mcp.json` in the user-data folder, if present | MCP servers (see below) |
+| `compact` | `COMPACT=1` | off | `api` only: server-side compaction of long conversations instead of starting over |
+| `claudeBin` | `CLAUDE_BIN` | found (see above) | path to the Claude Code CLI |
+| `claudeTools` | `CLAUDE_TOOLS` | `Read Glob Grep Bash(git log:*) …` | `claude-code` only: `--allowedTools` list |
+| `permissionMode` | `CLAUDE_PERMISSION_MODE` | unset | `claude-code` only: passed as `--permission-mode` |
+| `timeoutMs` | `TIMEOUT_MS` | `300000` | `claude-code` only: per-question limit |
+
+`GATEKEEPER_SHELL_ENV=0` skips reading the login shell's environment; `GATEKEEPER_USER_DATA` moves the user-data folder (the tests use both).
 
 ### MCP
 
-Put an `mcp.json` next to the server (or point `MCP_CONFIG` at one) in the format Claude Desktop and Claude Code use; `mcp.example.json` shows it.
+Put an `mcp.json` in the app's user-data folder (or point `mcpConfig` / `MCP_CONFIG` at one) in the format Claude Desktop and Claude Code use; `mcp.example.json` shows it.
 
-- `claude-code`: the file is passed straight to Claude Code with `--mcp-config`, and its tools are used as usual.
-- `api`: servers with a `command` are started by the bridge over stdio (MCP SDK) and their tools are offered to Claude alongside the repository tools; servers with a `url` are handed to the API's MCP connector, which connects to them server-side.
+- `claude-code`: the file is passed straight to Claude Code with `--mcp-config`, and its tools are used as usual. Claude Code also loads the repository's own `.mcp.json` and your user-level MCP servers by itself.
+- `api`: servers with a `command` are started by the app over stdio (MCP SDK) and their tools are offered to Claude alongside the repository tools; servers with a `url` are handed to the API's MCP connector, which connects to them server-side.
 
-### The protocol
+### How the window talks to the bridge
 
-`GET /health` → `{ gatekeeper: true, oracle, model, repo }`. The page probes this on its own origin when it wakes, so a page served by the bridge is live automatically. A page served from elsewhere can point at a bridge with `?api=http://localhost:3000` (and `&key=…` when a secret is set), or through the gear. The bridge also serves the page's own files under `/web/`; nothing else on disk is reachable.
-
-`POST /ask` with `{ question, session }`. With `Accept: text/event-stream` the answer streams as server-sent events: `tool` / `status` (what the oracle is doing, shown under the eye), `delta` (text, typed into the readout and spoken sentence by sentence as it arrives), then `done { answer }` or `error { message }`. Without it, plain JSON `{ answer }`.
-
-For remote or mobile use, put the bridge behind a tunnel (ngrok, Cloudflare Tunnel) and set `GATEKEEPER_SECRET`.
+The window is sandboxed: no Node, no network (its content policy sets `connect-src 'none'`), no navigation, no new windows, no permissions. `desktop/preload.cjs` gives it one object, `window.gatekeeper`, with `status()`, `redetect()`, `chooseRepo()`, `ask(id, question, session, onEvent)` and `cancel(id)`. While a question is answered the main process sends events back: `tool` / `status` (what the oracle is doing, shown under the eye) and `delta` (text, typed into the readout and spoken sentence by sentence as it arrives); `ask` then resolves `{ ok, answer }` or `{ ok: false, error }`.
 
 ## Controls
 
 | | |
 |---|---|
 | Type and press Enter, or ASK | ask the gatekeeper |
-| MIC | speak the question (Chrome and Safari, https or localhost) |
 | `/` | focus the input |
 | Esc, or tap the readout | dismiss an answer (Esc also closes the setup card) |
-| the faint gear, top-left | setup: bridge status, auto-bridge, instructions |
+| the faint gear, top-left | setup: link status, find Claude Code, choose a repository |
+| ⌘O / Ctrl+O | choose the repository |
 | Drag, or ← → / A D | move in the games |
 | Hold, or Space | fire (Purge the Swarm) |
 | Tap a rune, or ↑ → ↓ ← / W D S A | recite (Recite the Sigil) |
@@ -103,34 +118,37 @@ Leave it alone long enough and it mutters at you, and now and then glances at a 
 ## Tests
 
 ```sh
-npm test                 # repo tools, both oracles (fake CLI / mock Messages API + MCP), the HTTP server, static files, every page script parses and loads in order
-npx playwright install chromium && npm run test:e2e   # headless Chromium: standalone page, every game under an autopilot, the hidden panel from screws to corruption, bridge-served page, auto-bridge from a file:// page
-CHROMIUM=/path/to/chrome npm run test:e2e               # with a Chromium you already have
+npm test                 # repo tools, both oracles (fake CLI / mock Messages API + MCP), finding Claude Code (PATH, install locations, Windows shims, login shell), the bridge (oracle choice, repository, cancel), the window's lockdown, every page script parses and loads in order
+npm run test:e2e         # the desktop app under Playwright: no Claude Code (mock, every game under an autopilot, the hidden panel from screws to corruption), then a stand-in Claude Code on PATH found, linked and answering
+xvfb-run -a npm run test:e2e   # the same on a Linux machine without a display
 ```
 
 ## Structure
 
-- `index.html` — the markup, and the list of stylesheets and scripts. The scripts are plain (not modules) so the page works from `file://` with no build step; each leaves one object behind for the next, and the order matters.
+- `index.html` — the markup, the content policy, and the list of stylesheets and scripts. The scripts are plain (not modules), loaded from disk with no build step; each leaves one object behind for the next, and the order matters.
 - `web/styles/` — `base.css` (the theme tokens; `body.friendly` redefines them green, `body.corrupting` tears the page), `eye.css`, `console.css`, `readout.css`, `arena.css`, `wake.css`, `setup.css` (the gear and its card), `switch.css` (the plate, screws, hinge and switch).
 - `web/js/config.js` — `CONFIG`, the small helpers (`$`, `pick`, `rnd`, `clamp`, `wait`, `buzz`) and `Bus`, a tiny event bus.
 - `web/js/audio.js` — `Audio_`: buses, convolver reverb, the drone with its heartbeat and metallic hits, a combat pulse with a kick, hats and a danger alarm, one-bit sfx. `setWarm()` glides the drone from bare fifths to a major chord with a pad; the panel's sounds (`screw`, `drop`, `creak`, `clack`, `chime`, `slam`, `corrupt`).
-- `web/js/voice.js` — `Voice`: `speechSynthesis` pitched to the floor over a synthesized demon layer (detuned sub-bass, ring modulation, an asymmetric clipper, a throat formant that jumps on every word, static crackle, reverb); synced subtitles; `SpeechRecognition`. `setTone('kind')` switches to normal pitch over a soft hum.
+- `web/js/voice.js` — `Voice`: `speechSynthesis` pitched to the floor over a synthesized demon layer (detuned sub-bass, ring modulation, an asymmetric clipper, a throat formant that jumps on every word, static crackle, reverb); synced subtitles. `setTone('kind')` switches to normal pitch over a soft hum.
 - `web/js/eye.js` — `Eye`: almond lids, heartbeat-synced veins, a pre-rendered fibrous iris in two counter-rotating layers, pupil with saccades, moods (now also `fear` and `friendly`), bloom, grain, scan tears, chromatic ghosting. Two tints, red and green, each with its own iris render; `setTint(name, ms)` flickers between them before settling.
 - `web/js/arena.js` — `Arena`: the 160×240 one-bit runtime (tiers, banners, a danger state that drives the music, 3×5 pixel font, particles, shake, haptics), the skill record, and `define()`, which the games call.
 - `web/js/games/` — `bricks.js`, `shmup.js`, `dodge.js`, `sigil.js`: one trial each. Script order is the order of `Arena.GAMES`.
-- `web/js/backend.js` — `Bridge` (`detect` at wake, `auto` and `connect` for the gear, the remembered endpoint) and `askClaude`, the streaming client with the in-page mock.
+- `web/js/backend.js` — `Bridge` (`detect` at wake, `auto` and `chooseRepo` for the gear) and `askClaude`, the streaming client over `window.gatekeeper`.
 - `web/js/gate.js` — `Gate`: the flow, and its friendly variant that skips the trial.
 - `web/js/setup.js` — `Setup`: the gear and the card.
 - `web/js/switch.js` — `Switch`: the hidden panel, the friendly mode and the corruption that ends it.
 - `web/js/input.js`, `web/js/main.js` — buttons and keys; the wake tap and the console handle.
 
-  A console handle `GK` exposes the pieces: `GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`, `GK.arena.run(GK.arena.byName('sigil'), 2)`, `GK.arena.current()`, `GK.arena.skill()`, `GK.arena.forget()`, `GK.bridge.auto()`, `GK.setup.show(true)`, `GK.switch.state()`, `GK.switch.hold(ms)` (how long friendly lasts), `GK.switch.corrupt()`. Each game's tier is kept in `localStorage` under `gatekeeper.skill`; a bridge connected through the gear under `gatekeeper.api`.
-- `server.mjs` — HTTP server, auth, SSE, oracle selection.
-- `server/oracle-claude-code.mjs` — spawns `claude -p … --output-format stream-json`, streams deltas and tool activity, resumes sessions.
-- `server/oracle-api.mjs` — Anthropic SDK streaming tool-use loop; validates tool inputs, handles `refusal` / `pause_turn` / `max_tokens`, maps API errors to in-character messages. Starts over when a conversation outgrows its budget, or compacts with `COMPACT=1`.
-- `server/repo-tools.mjs` — `repo_list`, `repo_read`, `repo_search` (ripgrep when available), `repo_git` (allowlisted). Paths are confined to the repository, secrets are withheld.
-- `server/mcp.mjs` — loads `mcp.json`; stdio servers through the MCP SDK, remote ones through the API connector.
-- `server/persona.mjs` — the voice the oracles answer in.
+  A console handle `GK` exposes the pieces: `GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`, `GK.arena.run(GK.arena.byName('sigil'), 2)`, `GK.arena.current()`, `GK.arena.skill()`, `GK.arena.forget()`, `GK.bridge.auto()`, `GK.bridge.chooseRepo()`, `GK.setup.show(true)`, `GK.switch.state()`, `GK.switch.hold(ms)` (how long friendly lasts), `GK.switch.corrupt()`. Each game's tier is kept in `localStorage` under `gatekeeper.skill`.
+- `desktop/main.mjs` — the Electron main process: the window and its lockdown, the menu, the folder picker, IPC to the bridge, one instance at a time (a second launch with a folder hands it to the first).
+- `desktop/preload.cjs` — `window.gatekeeper`, the window's only way out.
+- `desktop/bridge.mjs` — picks the oracle, keeps the repository and the settings file, answers and cancels questions. Plain Node, so the tests drive it without Electron.
+- `desktop/find-claude.mjs` — finds Claude Code: the login shell's PATH, the install locations, Windows shims.
+- `desktop/oracle-claude-code.mjs` — spawns `claude -p … --output-format stream-json`, streams deltas and tool activity, resumes sessions.
+- `desktop/oracle-api.mjs` — Anthropic SDK streaming tool-use loop; validates tool inputs, handles `refusal` / `pause_turn` / `max_tokens`, maps API errors to in-character messages. Starts over when a conversation outgrows its budget, or compacts with `COMPACT=1`.
+- `desktop/repo-tools.mjs` — `repo_list`, `repo_read`, `repo_search` (ripgrep when available), `repo_git` (allowlisted). Paths are confined to the repository, secrets are withheld.
+- `desktop/mcp.mjs` — loads `mcp.json`; stdio servers through the MCP SDK, remote ones through the API connector.
+- `desktop/persona.mjs` — the voice the oracles answer in.
 
 ### Adding a game
 
@@ -138,10 +156,10 @@ Add a file under `web/js/games/` that calls `Arena.define(kit => def)` and list 
 
 ### Adding lines
 
-Append strings to `TAUNTS`, `LOSE`, `LOSE_AGAIN`, `WIN`, `WIN_STREAK`, `CONSULT`, `IDLE`, or their friendly counterparts `KIND_YES`, `KIND_CONSULT`, `KIND_IDLE`, in `web/js/gate.js`. What the eye says at the panel (`LOOSEN`, `OPENED`, `FRIENDLY`, `WANING`, `CORRUPT`, `RELOCATED`) is in `web/js/switch.js`. The oracles' voice lives in `server/persona.mjs`.
+Append strings to `TAUNTS`, `LOSE`, `LOSE_AGAIN`, `WIN`, `WIN_STREAK`, `CONSULT`, `IDLE`, or their friendly counterparts `KIND_YES`, `KIND_CONSULT`, `KIND_IDLE`, in `web/js/gate.js`. What the eye says at the panel (`LOOSEN`, `OPENED`, `FRIENDLY`, `WANING`, `CORRUPT`, `RELOCATED`) is in `web/js/switch.js`. The oracles' voice lives in `desktop/persona.mjs`.
 
 ## Known limits
 
-- Speech recognition is Chrome and Safari only and needs https or localhost. The text field always works.
-- Browser TTS cannot be routed through Web Audio, so the distortion and reverb run on a synthesized layer underneath it; the engine itself is only asked for the lowest pitch it offers. Voice quality varies by OS; Windows and macOS have the deepest default voices. iOS may ignore the pitch setting, so the demon layer does most of the work there.
+- There is no voice input in the desktop app: Electron has no speech-recognition service behind the browser API (Chrome's is Google's), so MIC is hidden and questions are typed.
+- The system's text-to-speech cannot be routed through Web Audio, so the distortion and reverb run on a synthesized layer underneath it; the engine itself is only asked for the lowest pitch it offers. Voice quality varies by OS; Windows and macOS have the deepest default voices.
 - The `api` oracle's request shape (streaming, adaptive thinking, `fallbacks: "default"`, eager tool-input streaming, the MCP connector) is verified against a mock of the Messages API in the tests; it has not been exercised against the live API from this repository.

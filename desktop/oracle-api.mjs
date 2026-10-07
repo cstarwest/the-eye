@@ -108,7 +108,7 @@ function validate(schema, input) {
 }
 
 function friendly(err) {
-  if (err instanceof Anthropic.AuthenticationError) return new Error('The gate has no key. Set ANTHROPIC_API_KEY, or run `ant auth login`, and restart the bridge.');
+  if (err instanceof Anthropic.AuthenticationError) return new Error('The gate has no key. Set ANTHROPIC_API_KEY, or run `ant auth login`, and restart the app.');
   if (err instanceof Anthropic.PermissionDeniedError) return new Error('The key does not open this gate. Check the model and the account.');
   if (err instanceof Anthropic.RateLimitError) return new Error('The session is overwhelmed. Ask again in a moment.');
   if (err instanceof Anthropic.APIConnectionError) return new Error('The session is out of reach. Check the network.');

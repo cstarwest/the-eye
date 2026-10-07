@@ -1,5 +1,5 @@
 /* Setup: a very faint gear in the top-left corner, and the card it opens with
-   the bridge status, an auto-bridge button and the instructions. */
+   the bridge status, the find and choose buttons and the instructions. */
 #setup-btn { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 8; width: 40px; height: 40px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text); opacity: .11; transition: opacity .4s, transform .6s; display: grid; place-items: center; box-shadow: none; }
 #setup-btn:hover, #setup-btn:focus-visible, #setup-btn.open { opacity: .75; background: transparent; box-shadow: none; }
 #setup-btn:hover svg, #setup-btn.open svg { transform: rotate(60deg); }
@@ -15,18 +15,13 @@
 #setup header button { min-height: 28px; padding: 0 10px; font-size: 11px; letter-spacing: .1em; }
 #setup h2 { font-size: 10px; letter-spacing: .28em; color: var(--mute); margin: 16px 0 6px; font-weight: normal; }
 #setup .auto { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-#setup .auto button { flex: 1; min-width: 180px; }
-#setup .auto button.live { animation: pulse .7s infinite alternate; }
+#setup .auto button { flex: 1; min-width: 160px; }
+#setup .auto button.live, #setup .auto button.want { animation: pulse .7s infinite alternate; }
 #setup .note { color: var(--mute); font-size: 11px; letter-spacing: .04em; }
 #setup dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 6px 0; }
 #setup dt { color: var(--mute); letter-spacing: .2em; font-size: 10px; align-self: baseline; padding-top: 2px; }
-#setup dd { color: #e8e2e2; word-break: break-all; }
+#setup dd { color: #e8e2e2; overflow-wrap: anywhere; }
 #setup dd.on { color: var(--red); text-shadow: 0 0 8px var(--red); }
-#setup form { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-#setup form input { flex: 1; min-width: 120px; background: rgba(0,0,0,.6); border: 1px solid var(--edge-soft); color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; outline: none; border-radius: 2px; }
-#setup form input::placeholder { color: var(--hint); }
-#setup form input:focus { border-color: var(--red); }
-#setup form button { min-height: 34px; padding: 0 12px; font-size: 11px; }
 #setup pre { margin: 6px 0 10px; padding: 8px 10px; background: rgba(0,0,0,.55); border: 1px solid var(--edge-soft); border-left: 2px solid var(--red); color: #efe9e9; font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 #setup pre b { color: var(--red); font-weight: normal; }
 #setup code { color: var(--red); font-size: 11.5px; }

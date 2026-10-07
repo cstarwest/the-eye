@@ -26,7 +26,11 @@ Arena.define(({ GW, GH, px, text, burst, shake, flash, note, setSpeed, paddleInp
       s.px = s.stun > 0 ? clamp(s.px, 0, GW - s.pw) : paddleInput(s.px, s.pw, 240, dt);
       // the wall advances, sooner each time
       s.adv -= dt;
-      if (s.adv <= 0) { s.b.forEach(k => k.y += 7); s.advAt = Math.max(1 - s.lvl * .03, s.advAt - .3); s.adv = s.advAt; if (s.advN++ < 2) note(s, 'THE WALL ADVANCES', .7); Audio_.sfx.thud(); shake(.25); buzz(20); }
+      if (s.adv <= 0) {
+        s.b.forEach(k => k.y += 7);
+        for (const ball of s.balls) for (let k; (k = s.b.find(k => k.hp && ball.x > k.x - 1 && ball.x < k.x + k.w + 1 && ball.y > k.y - 1 && ball.y < k.y + k.h + 1));) { ball.y = k.y + k.h + 1; ball.vy = Math.abs(ball.vy); }   // a ball the wall came down on drops out below it
+        s.advAt = Math.max(1 - s.lvl * .03, s.advAt - .3); s.adv = s.advAt; if (s.advN++ < 2) note(s, 'THE WALL ADVANCES', .7); Audio_.sfx.thud(); shake(.25); buzz(20);
+      }
       if (s.b.some(k => k.hp && k.y + k.h >= GH - 14)) { s.why = 'THE WALL TOOK YOU'; return false; }
       // serve
       if (s.serve > 0) { s.serve -= dt; if (s.serve <= 0) s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: Math.random() < .5 ? -60 : 60, vy: -105 }); }
@@ -36,8 +40,8 @@ Arena.define(({ GW, GH, px, text, burst, shake, flash, note, setSpeed, paddleInp
         s.glare -= dt;
         if (s.glare <= 0) { s.bolts.push({ x: 79, y: pupils[0].y + 8, v: 95 + s.lvl * 8 }); s.glare = Math.max(.9, rnd(1.6, 2.8) - s.lvl * .12); Audio_.sfx.shoot(); }
       }
-      s.bolts.forEach(o => o.y += o.v * dt);
-      for (const o of s.bolts) if (o.y > GH - 14 && o.y < GH - 6 && o.x + 2 > s.px && o.x < s.px + s.pw) { o.y = GH + 9; s.stun = .8; flash(); shake(.3); Audio_.sfx.hurt(); burst(o.x, GH - 10, 8); }
+      s.bolts.forEach(o => { o.py = o.y; o.y += o.v * dt; });
+      for (const o of s.bolts) if (o.y > GH - 14 && o.py < GH - 6 && o.x + 2 > s.px && o.x < s.px + s.pw) { o.y = GH + 9; s.stun = .8; flash(); shake(.3); Audio_.sfx.hurt(); burst(o.x, GH - 10, 8); }
       s.bolts = s.bolts.filter(o => o.y < GH + 8);
       // the balls, in sub-steps so a fast ball cannot pass through a brick or the paddle
       const speed = 150 * (1 + Math.min(.4, s.t / 16)) * s.boost * (1 + s.lvl * .05);
@@ -45,6 +49,7 @@ Arena.define(({ GW, GH, px, text, burst, shake, flash, note, setSpeed, paddleInp
         setSpeed(ball, speed);
         const n = Math.ceil(speed * dt / 3), h = dt / n;
         for (let i = 0; i < n && !ball.lost; i++) {
+          const x0 = ball.x, y0 = ball.y;
           ball.x += ball.vx * h; ball.y += ball.vy * h;
           if (ball.x < 2) { ball.x = 2; ball.vx = Math.abs(ball.vx); Audio_.sfx.bounce(); } if (ball.x > GW - 2) { ball.x = GW - 2; ball.vx = -Math.abs(ball.vx); Audio_.sfx.bounce(); }
           if (ball.y < 2) { ball.y = 2; ball.vy = Math.abs(ball.vy); Audio_.sfx.bounce(); }
@@ -56,7 +61,10 @@ Arena.define(({ GW, GH, px, text, burst, shake, flash, note, setSpeed, paddleInp
           if (ball.y > GH + 4) { ball.lost = true; break; }
           for (const k of s.b) if (k.hp && ball.x > k.x - 1 && ball.x < k.x + k.w + 1 && ball.y > k.y - 1 && ball.y < k.y + k.h + 1) {
             k.hp--; burst(ball.x, ball.y, k.hp ? 4 : 10); k.hp ? Audio_.sfx.hit() : Audio_.sfx.smash(); if (!k.hp && k.pupil) { shake(.3); flash(); }
-            const fromSide = ball.x < k.x || ball.x > k.x + k.w; if (fromSide) ball.vx *= -1; else ball.vy *= -1; break;
+            // bounce off the face it came through (judged from where it was a sub-step ago), back where it was
+            const wasX = x0 > k.x - 1 && x0 < k.x + k.w + 1, wasY = y0 > k.y - 1 && y0 < k.y + k.h + 1;
+            if (wasY && !wasX) { ball.vx *= -1; ball.x = x0; } else { ball.vy *= -1; ball.x = x0; ball.y = y0; }
+            break;
           }
         }
       }
