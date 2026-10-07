@@ -1,29 +1,75 @@
 # Gatekeeper Eye
 
-A single HTML file. A full-screen, dark, red eye guards a Claude session. Ask it something by typing or speaking; it taunts you in a low mechanical voice, drops you into a one-bit pixel game under a dark synth drone, and only answers if you win.
+A full-screen, dark, red eye guards a Claude session. Ask it something by typing or speaking; it taunts you in a low mechanical voice, drops you into a one-bit pixel game under a dark synth drone, and only answers if you win. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
 
-Everything is in `index.html`. There is no build step, no dependency, no audio file and no image: the eye, the voice layer, the music and the games are all generated in the browser.
+The page is one HTML file with no build step, no dependency, no audio file and no image: the eye, the voice layer, the music and the games are all generated in the browser. The bridge that connects it to Claude is a small Node server.
 
-## Running it
+## Quick start
 
-1. Open `index.html` in a browser (double-click works).
-2. Tap once anywhere. Browsers require a tap before audio starts.
-3. For the microphone, serve it over `localhost` or https (speech recognition refuses `file://`):
+```sh
+npm install
+node server.mjs            # serves the page and picks an oracle (see below)
+# open http://localhost:3000 and tap once
+```
 
-   ```sh
-   npx serve .
-   # or
-   node server.mjs
-   ```
+Without a bridge, the page still works on its own: open `index.html` directly and a mock oracle answers in character.
 
-   On a phone, open the served address on the same network, or drop the file on GitHub Pages / Netlify.
+## The oracles
+
+The bridge answers `POST /ask` through one of three oracles. It picks one automatically, or set `ORACLE=`:
+
+| Oracle | What answers | Needs |
+|---|---|---|
+| `claude-code` | `claude -p` running headlessly in your repository, with its own tools (Read, Glob, Grep, read-only git), resumed between questions so it remembers the conversation | [Claude Code](https://claude.ai/code) installed and logged in |
+| `api` | The Claude API (`claude-opus-5-5`, streaming, adaptive thinking, server-side refusal fallback) with built-in read-only repository tools and your MCP servers | `ANTHROPIC_API_KEY`, or `ant auth login` |
+| `mock` | Canned answers, no model | nothing |
+
+Auto-pick: `api` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_PROFILE` is set; else `claude-code` when `claude` is on the PATH; else `mock`.
+
+```sh
+REPO=/path/to/your/repo node server.mjs                       # Claude Code reads that repo
+ORACLE=api ANTHROPIC_API_KEY=sk-ant-... REPO=/path node server.mjs
+```
+
+### Environment
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` | `3000` | |
+| `REPO` | current directory | the repository the gatekeeper reads |
+| `GATEKEEPER_SECRET` | unset | when set, requests must carry it in an `x-gatekeeper-key` header (the page sends `?key=`) |
+| `ORACLE` | auto | `claude-code`, `api` or `mock` |
+| `MODEL` | Claude Code's default / `claude-opus-5-5` | model for the chosen oracle |
+| `EFFORT` | `medium` | `api` only: `low`, `medium`, `high`, `xhigh`, `max` |
+| `MAX_TURNS` | `12` | tool-use turns per question |
+| `MCP_CONFIG` | `./mcp.json` if present | MCP servers (see below) |
+| `COMPACT` | off | `api` only: `1` enables server-side compaction of long conversations instead of starting over |
+| `CLAUDE_BIN` | `claude` | path to the Claude Code CLI |
+| `CLAUDE_TOOLS` | `Read Glob Grep Bash(git log:*) …` | `claude-code` only: `--allowedTools` list |
+| `CLAUDE_PERMISSION_MODE` | unset | `claude-code` only: passed as `--permission-mode` |
+| `TIMEOUT_MS` | `300000` | `claude-code` only: per-question limit |
+
+### MCP
+
+Put an `mcp.json` next to the server (or point `MCP_CONFIG` at one) in the format Claude Desktop and Claude Code use; `mcp.example.json` shows it.
+
+- `claude-code`: the file is passed straight to Claude Code with `--mcp-config`, and its tools are used as usual.
+- `api`: servers with a `command` are started by the bridge over stdio (MCP SDK) and their tools are offered to Claude alongside the repository tools; servers with a `url` are handed to the API's MCP connector, which connects to them server-side.
+
+### The protocol
+
+`GET /health` → `{ gatekeeper: true, oracle, model, repo }`. The page probes this on its own origin when it wakes, so a page served by the bridge is live automatically. A page served from elsewhere can point at a bridge with `?api=http://localhost:3000` (and `&key=…` when a secret is set).
+
+`POST /ask` with `{ question, session }`. With `Accept: text/event-stream` the answer streams as server-sent events: `tool` / `status` (what the oracle is doing, shown under the eye), `delta` (text, typed into the readout and spoken sentence by sentence as it arrives), then `done { answer }` or `error { message }`. Without it, plain JSON `{ answer }`.
+
+For remote or mobile use, put the bridge behind a tunnel (ngrok, Cloudflare Tunnel) and set `GATEKEEPER_SECRET`.
 
 ## Controls
 
 | | |
 |---|---|
 | Type and press Enter, or ASK | ask the gatekeeper |
-| MIC | speak the question (Chrome and Safari) |
+| MIC | speak the question (Chrome and Safari, https or localhost) |
 | `/` | focus the input |
 | Esc, or tap the readout | dismiss an answer |
 | Drag, or ← → / A D | move in the games |
@@ -37,50 +83,37 @@ Everything is in `index.html`. There is no build step, no dependency, no audio f
    - **Breach the Wall** — brick breaker. The wall is shaped like an eye; the pupil takes two hits. Three balls.
    - **Purge the Swarm** — shoot 'em up. Twenty-four kills, three lives, waves that thicken as you score.
    - **Outrun the Static** — dodge falling static and sweeping bars for twenty seconds. One life.
-4. Lose, and it mocks you (differently if you keep losing). Win, and it consults the session and reads the answer out, typing it into a readout panel.
+4. Lose, and it mocks you (differently if you keep losing). Win, and it consults the session: the eye rolls up, the readout opens, and you watch what it reads (`READING src/auth/token.ts`, `SEARCHING "refresh"`) before the answer types itself out and is read aloud.
 
 Leave it alone long enough and it mutters at you.
 
-## Wiring the real Claude
-
-`askClaude(question)` in `index.html` is the only backend touchpoint. By default it is a mock oracle that answers in character. Two ways to make it real:
-
-**Use the included bridge.** `server.mjs` is a dependency-free Node server that serves the page and exposes `POST /ask`, which runs `claude -p "<question>"` in a repository directory (Claude Code, headless):
+## Tests
 
 ```sh
-REPO=/path/to/your/repo node server.mjs
-# open http://localhost:3000
+npm test                 # repo tools, both oracles (fake CLI / mock Messages API + MCP), the HTTP and SSE server
+npx playwright install chromium && npm run test:e2e   # headless Chromium: standalone page and bridge-served page
 ```
 
-Options: `PORT` (default 3000), `REPO` (directory Claude Code runs in, default: current), `GATEKEEPER_SECRET` (if set, requests must send it in an `x-gatekeeper-key` header), `CLAUDE_BIN` (default `claude`).
+## Structure
 
-**Or point the page at any server.** Add `?api=http://localhost:3000` to the URL (or set `CONFIG.api` at the top of the script). The page POSTs `{ question }` to `<api>/ask` and expects `{ answer }`. Add `&key=<secret>` to send the shared secret as `x-gatekeeper-key`. For remote or mobile use, put the server behind a tunnel (ngrok, Cloudflare Tunnel) and set the shared secret.
-
-## Structure of the source
-
-`index.html` is organised in sections, each a small module:
-
-- **CONFIG** — the API endpoint, voice pitch and rate, reduced-motion detection.
-- **AUDIO** — Web Audio only. Buses for music, sfx and voice; a convolver reverb built from generated noise; the drone (detuned saw and square oscillators through a resonant lowpass swept by a slow LFO, a breathing noise bed, a heartbeat whose tempo follows an `intensity` value, distant metallic hits); a combat bass pulse for the games; one-bit sound effects.
-- **VOICE** — `speechSynthesis` pitched down, with a synthesized mechanical layer underneath (saw + square → tanh distortion → lowpass → flutter → reverb) that pulses on every word boundary, so it still reads as a machine where the pitch setting is ignored. Subtitles are typed in sync with the words. `SpeechRecognition` for the mic.
-- **EYE** — layered canvas. Almond-shaped lids clip a dark sclera; veins flash on each heartbeat; the iris is a pre-rendered fibre texture in two counter-rotating layers so its noise drifts; the pupil tracks the pointer with saccades, dilates by mood and narrows to a slit when angry; bloom, film grain, scan tears and chromatic ghosting on top. Moods: sleep, waking, idle, attend, angry, judge, pleased, contempt, consult.
-- **ARENA** — the one-bit games on a 160×240 logical canvas, letterboxed at an integer scale, with a 3×5 pixel font, particles, screen shake, inversion flashes and haptics.
-- **BACKEND** — `askClaude`.
-- **GATE** — the flow: taunt → glitch → game → verdict → consult → readout.
-- **INPUT / WAKE** — wiring and the tap-to-wake sequence.
-
-A console handle is exposed for poking at it: `GK.gate('question')`, `GK.eye.setMood('angry')`, `GK.arena.run(GK.arena.byName('swarm'))`, `GK.arena.end(true)` to force a win.
+- `index.html` — the page. Sections: CONFIG · AUDIO (buses, convolver reverb, the drone with its heartbeat and metallic hits, a combat pulse, one-bit sfx) · VOICE (`speechSynthesis` pitched down, a synthesized mechanical layer pulsed on word boundaries, synced subtitles, `SpeechRecognition`) · EYE (almond lids, heartbeat-synced veins, a pre-rendered fibrous iris in two counter-rotating layers, pupil with saccades, moods, bloom, grain, scan tears, chromatic ghosting) · ARENA (160×240 one-bit games, 3×5 pixel font, particles, shake, haptics) · BACKEND (`askClaude`, the streaming client and the mock) · GATE (the flow) · INPUT · WAKE. A console handle `GK` exposes the pieces (`GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`).
+- `server.mjs` — HTTP server, auth, SSE, oracle selection.
+- `server/oracle-claude-code.mjs` — spawns `claude -p … --output-format stream-json`, streams deltas and tool activity, resumes sessions.
+- `server/oracle-api.mjs` — Anthropic SDK streaming tool-use loop; validates tool inputs, handles `refusal` / `pause_turn` / `max_tokens`, maps API errors to in-character messages. Starts over when a conversation outgrows its budget, or compacts with `COMPACT=1`.
+- `server/repo-tools.mjs` — `repo_list`, `repo_read`, `repo_search` (ripgrep when available), `repo_git` (allowlisted). Paths are confined to the repository, secrets are withheld.
+- `server/mcp.mjs` — loads `mcp.json`; stdio servers through the MCP SDK, remote ones through the API connector.
+- `server/persona.mjs` — the voice the oracles answer in.
 
 ### Adding a game
 
-Write an object with `name`, `brief`, `help` (`[touch hint, keyboard hint]`), `init()` returning a state, `step(state, dt)` returning `true` to win, `false` to lose or nothing to continue, and `draw(state)` using the one-bit helpers (`px`, `text`, `sprite`, `burst`, `flash`, `shake`), then add it to `GAMES`. If the state has `x` or `px`, the eye behind the arena will watch it.
+Write an object with `name`, `brief`, `help` (`[touch hint, keyboard hint]`), `init()` returning a state, `step(state, dt)` returning `true` to win, `false` to lose or nothing to continue, and `draw(state)` using the one-bit helpers (`px`, `text`, `sprite`, `burst`, `flash`, `shake`), then add it to `GAMES`. If the state has `x` or `px`, the eye behind the arena watches it.
 
 ### Adding lines
 
-Append strings to `TAUNTS`, `LOSE`, `LOSE_AGAIN`, `WIN`, `WIN_STREAK`, `CONSULT` or `IDLE` in the GATE section.
+Append strings to `TAUNTS`, `LOSE`, `LOSE_AGAIN`, `WIN`, `WIN_STREAK`, `CONSULT` or `IDLE` in the GATE section. The oracles' voice lives in `server/persona.mjs`.
 
 ## Known limits
 
 - Speech recognition is Chrome and Safari only and needs https or localhost. The text field always works.
 - Browser TTS cannot be routed through Web Audio, so the distortion and reverb run on a synthesized layer underneath it. Voice quality varies by OS; Windows and macOS have the deepest default voices. iOS may ignore the pitch setting, so the mechanical layer does most of the work there.
-- Chrome desktop cuts long utterances after about fifteen seconds; the page nudges it, but very long answers may still clip.
+- The `api` oracle's request shape (streaming, adaptive thinking, `fallbacks: "default"`, eager tool-input streaming, the MCP connector) is verified against a mock of the Messages API in the tests; it has not been exercised against the live API from this repository.

@@ -110,6 +110,8 @@ const CONFIG = {
   // Can also be set per visit with ?api=http://localhost:3000
   api: new URLSearchParams(location.search).get('api') || null,
   key: new URLSearchParams(location.search).get('key') || null,   // sent as x-gatekeeper-key when set
+  session: (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0, 8),
+  oracle: null,                                                    // label reported by the bridge's /health
   voice: { pitch: 0.35, rate: 0.82 },
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
 };
@@ -335,17 +337,18 @@ const Voice = (() => {
     return new Promise(res => {
       speaking = true;
       const total = text.length, ms = Math.max(1200, total * 68 / CONFIG.voice.rate);
-      const el = opts.el || lineEl, plain = !!opts.plain;
+      const el = opts.el || lineEl, plain = !!opts.plain, silent = !!opts.silent;
+      const render = (n, final) => { if (!silent) renderLine(text, n, final, el, plain); };
       let shown = 0, done = false, began = false, timer = 0, keep = 0, g = null;
       const finish = () => {
         if (done) return; done = true; speaking = false;
-        clearInterval(timer); clearInterval(keep); g && g.end(); renderLine(text, total, true, el, plain);
+        clearInterval(timer); clearInterval(keep); g && g.end(); render(total, true);
         setTimeout(res, opts.hold ?? 300);
       };
       const start = () => {
         if (began) return; began = true;
         g = growl(ms);
-        timer = setInterval(() => { if (shown < total) { shown++; renderLine(text, shown, false, el, plain); } }, 58 / CONFIG.voice.rate);
+        timer = setInterval(() => { if (shown < total) { shown++; render(shown, false); } }, 58 / CONFIG.voice.rate);
       };
       if (!hasTTS || !(voices.length || (loadVoices(), voices.length))) { start(); setTimeout(finish, ms); return; }
       speechSynthesis.cancel();
@@ -739,15 +742,52 @@ const Arena = (() => {
 })();
 
 // ----------------------------- BACKEND -------------------------------
-// The one function to replace. With CONFIG.api set it POSTs to <api>/ask and
-// expects { answer }. Without it, a mock oracle answers in character.
-async function askClaude(question) {
-  if (CONFIG.api) {
-    const r = await fetch(CONFIG.api.replace(/\/$/, '') + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(CONFIG.key ? { 'x-gatekeeper-key': CONFIG.key } : {}) }, body: JSON.stringify({ question }) });
-    if (!r.ok) throw new Error(`the gate returned ${r.status}`);
-    return (await r.json()).answer;
+// The one touchpoint. With CONFIG.api set (?api=..., or a bridge detected on
+// the page's own origin) it POSTs { question, session } to <api>/ask and reads
+// the server-sent stream: delta (text), tool/status (what the oracle is doing),
+// done, error. Without it, a mock oracle answers in character, streamed the
+// same way, so the rest of the page never knows the difference.
+async function detectBridge() {
+  if (CONFIG.api === null && location.protocol === 'file:') return;
+  const base = CONFIG.api === null ? '' : CONFIG.api.replace(/\/$/, '');
+  try {
+    const r = await fetch(base + '/health', { signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(2500) : undefined });
+    const j = await r.json();
+    if (j && j.gatekeeper) { CONFIG.api = base; CONFIG.oracle = String(j.oracle || 'live').replace(/-/g, ' ').toUpperCase(); CONFIG.model = j.model || null; }
+  } catch (e) { if (CONFIG.api !== null) CONFIG.oracle = 'LIVE'; }
+}
+async function askClaude(question, { onDelta = () => {}, onEvent = () => {}, signal } = {}) {
+  if (CONFIG.api !== null) {
+    const r = await fetch(CONFIG.api.replace(/\/$/, '') + '/ask', {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(CONFIG.key ? { 'x-gatekeeper-key': CONFIG.key } : {}) },
+      body: JSON.stringify({ question, session: CONFIG.session }),
+    });
+    if (!r.ok) { let m = `the gate returned ${r.status}`; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
+    if (!/text\/event-stream/.test(r.headers.get('content-type') || '')) return String((await r.json()).answer);
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '', text = '', done = null;
+    while (true) {
+      const { value, done: end } = await reader.read(); if (end) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        const dataLine = chunk.split('\n').find(l => l.startsWith('data:')); if (!dataLine) continue;
+        let ev; try { ev = JSON.parse(dataLine.slice(5)); } catch (e) { continue; }
+        if (ev.type === 'delta') { text += ev.text; onDelta(ev.text); }
+        else if (ev.type === 'tool' || ev.type === 'status') onEvent(ev.label || ev.text || '');
+        else if (ev.type === 'done') done = String(ev.answer ?? text);
+        else if (ev.type === 'error') throw new Error(ev.message || 'the session failed');
+      }
+    }
+    if (done === null && !text) throw new Error('the session went silent');
+    return done ?? text;
   }
-  await wait(rnd(1100, 2200));
+  // ---- mock oracle (no server): in character, keyword-aware, streamed word by word
+  await wait(rnd(500, 900)); onEvent('SCANNING /');
+  await wait(rnd(500, 900)); onEvent('READING SRC/MAIN.TS');
+  await wait(rnd(400, 800));
   const q = question.toLowerCase();
   const rules = [
     [/test|spec|coverage/, 'There are 214 tests. Three are skipped, and I would not trust the skipped ones. The slowest suite is the integration run against the fixtures in test/fixtures; it alone takes forty seconds.'],
@@ -759,14 +799,17 @@ async function askClaude(question) {
     [/api|endpoint|route|rest|graphql/, 'The public API is defined once, in packages/api/schema. The route handlers are generated from it. If a route exists that the schema does not describe, it is a ghost. Remove it.'],
     [/perf|slow|fast|latency|memory/, 'The slow path is the serializer. It walks the object graph twice. Cache the first walk and you reclaim most of what you are losing. The rest is the network, and the network is not mine.'],
   ];
-  for (const [re, a] of rules) if (re.test(q)) return a;
-  return pick([
+  const found = rules.find(([re]) => re.test(q));
+  const text = found ? found[1] : pick([
     'That service is deprecated. The replacement is the event bus in packages/core. Everything still calling the old one is listed in the deprecation report. Nobody has read it.',
     'The entry point is src/main.ts. It wires the router, the store and the telemetry, in that order, and the order matters more than the comments admit.',
     'The configuration is layered: defaults, then the environment file, then flags. Flags win. Someone shipped a flag that is always on. It is the third one.',
     'The module you are asking about is six hundred lines, and a third of them are dead. I can tell you which third. Ask again, and ask better.',
     'Two code paths do the same work. One of them is correct. The tests cover the other.',
   ]);
+  let out = '';
+  for (const w of text.split(/(?<=\s)/)) { if (signal && signal.aborted) break; out += w; onDelta(w); await wait(rnd(25, 60)); }
+  return out;
 }
 
 // ------------------------------- GATE --------------------------------
@@ -790,14 +833,34 @@ const Gate = (() => {
   const CONSULT = ['Consulting the session.', 'Reading what you could not.', 'The context is open to me. One moment.'];
   const IDLE = ['I am still here.', 'Ask. Or leave.', 'The session waits. So do I.', 'I can hear you thinking. It is not impressive.', 'Silence is also an answer. A cowardly one.'];
   const ui = $('ui'), q = $('q'), askBtn = $('ask'), mic = $('mic'), answer = $('answer'), abody = $('abody'), line = $('line');
-  let busy = false, fails = 0, wins = 0, lastActivity = performance.now(), attendTimer = 0;
+  let busy = false, fails = 0, wins = 0, lastActivity = performance.now(), attendTimer = 0, currentAsk = null;
+  addEventListener('pagehide', () => currentAsk && currentAsk.abort());
 
   function glitch() { const el = $('glitch'); el.classList.remove('on'); void el.offsetWidth; el.classList.add('on'); Audio_.sfx.glitch(); buzz(40); }
   function setBusy(v) { busy = v; askBtn.disabled = v; mic.disabled = v; q.disabled = v; }
   function hideAnswer() { answer.classList.remove('on'); }
   function showAnswer() {
-    abody.textContent = ''; $('astamp').textContent = `${CONFIG.api ? 'LIVE' : 'MOCK'} · ${new Date().toTimeString().slice(0, 8)}`;
+    renderReadout('', false);
+    $('astamp').textContent = `${CONFIG.oracle || (CONFIG.api !== null ? 'LIVE' : 'MOCK')} · SESSION ${CONFIG.session.toUpperCase()}`;
     answer.classList.add('on');
+  }
+  function renderReadout(text, final) {
+    abody.textContent = text;
+    if (!final) { const c = document.createElement('span'); c.className = 'cur'; abody.appendChild(c); }
+    answer.scrollTop = answer.scrollHeight;
+  }
+  // Speaks the readout sentence by sentence as the text streams in, so the
+  // voice starts before the oracle has finished.
+  function makeSpeaker() {
+    let upTo = 0, queue = [], running = null, started = false;
+    const re = /[.!?…]["')\]]*(?:\s+)|\n\s*\n/g;
+    const drain = async () => { while (queue.length) await Voice.say(queue.shift(), { silent: true, hold: 80 }); running = null; };
+    const kick = () => { if (started && !running && queue.length) running = drain(); };
+    return {
+      start() { started = true; kick(); },
+      push(text) { re.lastIndex = upTo; let m; while ((m = re.exec(text))) { const s = text.slice(upTo, m.index + m[0].length).trim(); upTo = m.index + m[0].length; if (s) queue.push(s); } kick(); },
+      async finish(text) { const rest = text.slice(upTo).trim(); upTo = text.length; if (rest) queue.push(rest); started = true; kick(); while (running) await running; },
+    };
   }
   function pulseLine(text) { let n = 0; line.textContent = text; const id = setInterval(() => { line.textContent = text + '.'.repeat(n = (n + 1) % 4); }, 400); return () => clearInterval(id); }
 
@@ -822,15 +885,23 @@ const Gate = (() => {
     wins++; fails = 0; Eye.setMood('pleased'); Audio_.setIntensity(.25);
     await Voice.say(wins > 1 ? pick(WIN_STREAK) : pick(WIN));
     Eye.setMood('consult'); glitch();
-    const pending = askClaude(question);
-    await Voice.say(pick(CONSULT), { hold: 0 });
-    const stopPulse = pulseLine('CONSULTING');
-    let text;
-    try { text = String(await pending); } catch (e) { text = `The session did not answer. ${e && e.message ? e.message : e}`; }
-    stopPulse();
-    Eye.setMood('attend'); Audio_.setIntensity(.1); Audio_.sfx.blip();
-    showAnswer(); line.textContent = 'THE GATE IS OPEN';
-    await Voice.say(text, { el: abody, plain: true, hold: 400 });
+    const ac = new AbortController(); currentAsk = ac;
+    const speaker = makeSpeaker();
+    let text = '', answer, consulting = true, stopPulse = () => {};
+    const opened = () => { stopPulse(); stopPulse = () => {}; line.textContent = 'THE GATE IS OPEN'; Eye.setMood('attend'); Audio_.setIntensity(.1); };
+    showAnswer();
+    const pending = askClaude(question, {
+      onDelta: d => { if (!text && !consulting) opened(); text += d; renderReadout(text, false); speaker.push(text); },
+      onEvent: label => { Audio_.sfx.blip(); if (consulting) return; stopPulse(); stopPulse = () => {}; line.textContent = String(label).toUpperCase().slice(0, 64); },
+      signal: ac.signal,
+    });
+    const consult = Voice.say(pick(CONSULT), { hold: 0 }).then(() => { consulting = false; if (text) opened(); else stopPulse = pulseLine('CONSULTING'); speaker.start(); });
+    try { answer = String(await pending); } catch (e) { answer = `The session did not answer. ${e && e.message ? e.message : e}`; }
+    await consult; currentAsk = null;
+    if (answer !== text) { text = answer; renderReadout(text, false); speaker.push(text); }   // non-streamed answer, or a final answer that differs
+    opened();
+    await speaker.finish(text);
+    renderReadout(text, true);
     Eye.setMood('idle'); setBusy(false);
   }
 
@@ -873,6 +944,7 @@ const Gate = (() => {
 $('wake').addEventListener('click', async function () {
   if (this.classList.contains('off')) return;
   this.classList.add('off');
+  detectBridge();
   Audio_.init(); await Audio_.resume();
   if ('speechSynthesis' in window) speechSynthesis.getVoices();
   Eye.start(); Eye.setMood('waking');
