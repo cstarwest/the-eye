@@ -99,6 +99,21 @@ test('api oracle: tool-use loop over the Messages API with streaming, repo tools
   await mcp.close(); await echo.close(); await api.close();
 });
 
+test('page: every script index.html loads exists, parses, and is loaded in dependency order', async () => {
+  const html = await readFile(join(root, 'index.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
+  const styles = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map(m => m[1]);
+  assert.ok(scripts.length >= 10 && styles.length >= 5, `${scripts.length} scripts, ${styles.length} styles`);
+  for (const f of [...scripts, ...styles]) await readFile(join(root, f));                       // each one exists
+  for (const f of scripts) execFileSync(process.execPath, ['--check', join(root, f)]);          // and parses
+  const order = scripts.map(s => s.replace(/^web\/js\//, '').replace(/\.js$/, ''));
+  const before = (a, b) => assert.ok(order.indexOf(a) < order.indexOf(b), `${a} must load before ${b}`);
+  before('config', 'audio'); before('audio', 'voice'); before('voice', 'eye'); before('eye', 'arena');
+  for (const g of ['games/bricks', 'games/shmup', 'games/dodge', 'games/sigil']) before('arena', g);
+  before('backend', 'gate'); before('gate', 'setup'); before('gate', 'switch'); before('switch', 'main'); before('setup', 'input');
+  assert.equal(order[order.length - 1], 'main');
+});
+
 test('server: health, secret, JSON answer and SSE stream with the mock oracle', async () => {
   const port = 3100 + Math.floor(Math.random() * 800);
   const child = spawn(process.execPath, [join(root, 'server.mjs')], { env: { ...process.env, ORACLE: 'mock', PORT: String(port), GATEKEEPER_SECRET: 's3', REPO: root }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -107,7 +122,19 @@ test('server: health, secret, JSON answer and SSE stream with the mock oracle', 
     const base = `http://127.0.0.1:${port}`;
     const health = await (await fetch(base + '/health')).json();
     assert.equal(health.gatekeeper, true); assert.equal(health.oracle, 'mock'); assert.equal(health.secret, true);
-    assert.match((await (await fetch(base + '/')).text()), /<title>GATEKEEPER<\/title>/);
+    const page = await (await fetch(base + '/')).text();
+    assert.match(page, /<title>GATEKEEPER<\/title>/);
+    // the page's scripts and styles are served from web/, and nothing outside it is reachable
+    for (const src of [...page.matchAll(/(?:src|href)="(web\/[^"]+)"/g)].map(m => m[1])) {
+      const f = await fetch(`${base}/${src}`);
+      assert.equal(f.status, 200, src);
+      assert.match(f.headers.get('content-type'), src.endsWith('.css') ? /text\/css/ : /text\/javascript/, src);
+    }
+    assert.equal((await fetch(base + '/web/js/nope.js')).status, 404);
+    assert.equal((await fetch(base + '/web/../server.mjs')).status, 404);
+    assert.equal((await fetch(base + '/web/%2e%2e/server.mjs')).status, 404);
+    assert.equal((await fetch(base + '/server.mjs')).status, 404);
+    assert.equal((await fetch(base + '/web/js')).status, 404);
     assert.equal((await fetch(base + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"question":"x"}' })).status, 401);
     const json = await (await fetch(base + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-gatekeeper-key': 's3' }, body: JSON.stringify({ question: 'where are the tests?', session: 'j1' }) })).json();
     assert.match(json.answer, /214 tests/); assert.equal(json.oracle, 'mock');

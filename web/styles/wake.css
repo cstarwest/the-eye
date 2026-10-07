@@ -1,0 +1,6 @@
+/* The wake screen: a breathing slit, until the first tap. */
+#wake { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; background: #000; color: var(--red); letter-spacing: .5em; font-size: 12px; cursor: pointer; transition: opacity 1.2s; }
+#wake.off { opacity: 0; pointer-events: none; }
+#wake .slit { width: min(60vw, 320px); height: 2px; background: var(--red); box-shadow: 0 0 24px var(--red), 0 0 80px var(--dim); animation: breathe 3.2s ease-in-out infinite; }
+@keyframes breathe { 0%,100% { transform: scaleX(.3); opacity: .35 } 50% { transform: scaleX(1); opacity: 1 } }
+#wake small { letter-spacing: .3em; font-size: 10px; color: var(--hint); }

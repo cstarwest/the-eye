@@ -1,0 +1,31 @@
+/* Theme tokens and page basics. Every colour the page uses comes from these
+   variables, so the whole interface can turn from red to green when the eye is
+   switched to friendly (body.friendly) and back again when it corrupts. */
+:root {
+  --red: #ff1a1a; --ember: #ff4a1a; --dim: #3a0000; --blood: #1a0000;
+  --edge: #3a0000; --edge-soft: #2a0000; --hint: #5a2a2a; --inset: #0a0000; --pane: rgba(4,0,0,.82);
+  --ink: #050505; --text: #c9c9c9; --mute: #6a6a6a;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+body.friendly {
+  --red: #2bff7a; --ember: #7affb0; --dim: #003a14; --blood: #001a08;
+  --edge: #0a3a18; --edge-soft: #072a12; --hint: #2a5a3a; --inset: #000a04; --pane: rgba(0,4,1,.82);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: var(--ink); color: var(--text); font-family: var(--mono); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+body.shake { animation: shake .28s linear; }
+@keyframes shake { 0%,100% { transform: none } 20% { transform: translate(-6px, 3px) } 40% { transform: translate(5px, -4px) } 60% { transform: translate(-4px, -2px) } 80% { transform: translate(3px, 4px) } }
+
+/* ---- corruption: the whole page tears while the friendly mode is taken back ---- */
+body.corrupting #eye, body.corrupting #ui, body.corrupting #answer { animation: corrupt .18s steps(3) infinite; }
+@keyframes corrupt {
+  0% { filter: none; transform: none }
+  33% { filter: hue-rotate(-140deg) saturate(2) contrast(1.4); transform: translate(3px, -2px) skewX(2deg) }
+  66% { filter: hue-rotate(20deg) brightness(1.3); transform: translate(-4px, 1px) }
+  100% { filter: invert(.15) hue-rotate(90deg); transform: translate(1px, 3px) skewX(-1deg) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.shake { animation: none }
+  body.corrupting #eye, body.corrupting #ui, body.corrupting #answer { animation: none; filter: hue-rotate(-60deg) }
+}

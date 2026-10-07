@@ -19,7 +19,7 @@
 import { createServer } from 'node:http';
 import { readFile, access } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve, basename } from 'node:path';
+import { dirname, join, resolve, basename, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
@@ -101,12 +101,27 @@ async function handleAsk(req, res) {
   } finally { clearInterval(keepalive); busy.delete(session); }
 }
 
+// The page's own files: index.html at the root, and everything under web/ (styles,
+// scripts). Nothing else on disk is reachable.
+const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
+const WEB = join(here, 'web');
+async function serveStatic(res, pathname) {
+  let rel; try { rel = decodeURIComponent(pathname); } catch { return send(res, 400, { error: 'bad path' }); }
+  const file = resolve(here, '.' + rel);
+  if (!file.startsWith(WEB + sep)) return send(res, 404, { error: 'not found' });
+  const type = MIME[extname(file).toLowerCase()];
+  if (!type) return send(res, 404, { error: 'not found' });
+  try { return send(res, 200, await readFile(file), type); }
+  catch (e) { return send(res, e?.code === 'ENOENT' || e?.code === 'EISDIR' ? 404 : 500, { error: e?.code === 'ENOENT' || e?.code === 'EISDIR' ? 'not found' : 'internal error' }); }
+}
+
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
     if (req.method === 'OPTIONS') return send(res, 204, '', 'text/plain');
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html'))
       return send(res, 200, await readFile(join(here, 'index.html')), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname.startsWith('/web/')) return await serveStatic(res, url.pathname);
     if (req.method === 'GET' && url.pathname === '/health')
       return send(res, 200, { gatekeeper: true, oracle: oracle.kind, model: oracle.model, repo: basename(cfg.repo), secret: !!cfg.secret });
     if (req.method === 'POST' && url.pathname === '/ask') return await handleAsk(req, res);
