@@ -1,0 +1,24 @@
+{
+  "name": "gatekeeper-eye",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A red eye that guards a Claude session. Single-file page plus an optional bridge to Claude Code or the Claude API.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.50.0"
+  },
+  "license": "MIT"
+}

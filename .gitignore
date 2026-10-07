@@ -1,0 +1,5 @@
+node_modules/
+mcp.json
+.env
+*.log
+test/shots/
