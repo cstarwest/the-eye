@@ -610,8 +610,9 @@ const Eye = (() => {
 // (win) | false (lose) | undefined (continue), draw(state) }. `level` is that
 // game's own tier: how often the player has beaten it, kept across visits (see
 // `skill` at the end); every game gets a little harder with it, and every game
-// escalates while it runs. A trial is short, about twenty seconds, and eases you
-// in for a moment before it bites. Optional state fields the arena reads:
+// escalates while it runs. A trial is a handful of seconds, enough for a few
+// meaningful moves, easy for a beat before it bites. Optional state fields the
+// arena reads:
 // `heat` (0..1, the music climbs with it), `danger` (the frame pulses red and
 // an alarm joins the beat), `look` ({x, y} in arena pixels: where the eye
 // behind the arena stares; otherwise it follows `px` / `x`), `inverted` (draw
@@ -677,7 +678,7 @@ const Arena = (() => {
     for (let n = 3; n > 0; n--) {
       g.fillStyle = '#000'; g.fillRect(0, 0, GW, GH);
       text(def.name, 86, '#fff', 2); text(brief, 104, '#888'); if (lvl) text(`TIER ${lvl + 1}`, 114, '#fff');
-      text(String(n), 130, '#fff', 6); Audio_.sfx.count(false); await wait(520);
+      text(String(n), 130, '#fff', 6); Audio_.sfx.count(false); await wait(440);
     }
     g.fillStyle = '#fff'; g.fillRect(0, 0, GW, GH); Audio_.sfx.count(true); await wait(90);
   }
@@ -723,22 +724,22 @@ const Arena = (() => {
   }
 
   // ---- 1. BREACH THE WALL: a wall shaped like an eye, close enough to touch, and it is
-  //      coming for you. It is breached once enough of it has fallen (fourteen bricks of
+  //      coming for you. It is breached once enough of it has fallen (six bricks of
   //      twenty-six, a few more at higher tiers): the iris takes two hits, the pupil
   //      three, and the pupil fires glare that stuns the paddle. The wall descends a row
   //      at a time, sooner each time, and takes you if it reaches the paddle; a second
-  //      ball is served within seconds; the balls quicken with every second and every
-  //      return; the paddle shrinks as the wall thins. Three balls.
+  //      ball is served almost at once; the balls quicken with every second and every
+  //      return; the paddle shrinks as the wall thins. Three balls. A few seconds.
   const BRICKS = {
-    name: 'BREACH THE WALL', brief: lvl => `BREAK ${14 + Math.floor(lvl / 2)} BRICKS. THREE BALLS.`, help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
+    name: 'BREACH THE WALL', brief: lvl => `BREAK ${6 + Math.floor(lvl / 3)} BRICKS. THREE BALLS.`, help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
     init: lvl => {
-      const b = [], shape = ['..####..', '.######.', '##.##.##', '.######.', '..####..'], y0 = 92 + (lvl >= 5 ? 7 : 0);
+      const b = [], shape = ['..####..', '.######.', '##.##.##', '.######.', '..####..'], y0 = 106 + (lvl >= 5 ? 7 : 0);
       shape.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === '#') {
         const pupil = r === 2 && (c === 3 || c === 4), iris = (r === 1 || r === 3) && (c === 3 || c === 4);
         b.push({ x: 5 + c * 19, y: y0 + r * 7, w: 17, h: 6, hp: pupil ? 3 : iris ? 2 : 1, pupil });
       } });
-      const adv = 3.5 - lvl * .1;
-      return { px: 65, pw: 30, balls: [], b, total: b.length, need: 14 + Math.floor(lvl / 2), lives: 3, t: 0, serve: 1, boost: 1, adv, advAt: adv, advN: 0, bolts: [], glare: 2.5, stun: 0, split: false, heat: 0, danger: false };
+      const adv = 2.2 - lvl * .08;
+      return { px: 65, pw: 30, balls: [], b, total: b.length, need: 6 + Math.floor(lvl / 3), lives: 3, t: 0, serve: .6, boost: 1, adv, advAt: adv, advN: 0, bolts: [], glare: 1.4, stun: 0, split: false, heat: 0, danger: false };
     },
     step: (s, dt) => {
       s.t += dt; s.stun -= dt;
@@ -747,21 +748,21 @@ const Arena = (() => {
       s.px = s.stun > 0 ? clamp(s.px, 0, GW - s.pw) : paddleInput(s.px, s.pw, 240, dt);
       // the wall advances, sooner each time
       s.adv -= dt;
-      if (s.adv <= 0) { s.b.forEach(k => k.y += 7); s.advAt = Math.max(1.5 - s.lvl * .03, s.advAt - .3); s.adv = s.advAt; if (s.advN++ < 2) note(s, 'THE WALL ADVANCES', .7); Audio_.sfx.thud(); shake(.25); buzz(20); }
+      if (s.adv <= 0) { s.b.forEach(k => k.y += 7); s.advAt = Math.max(1 - s.lvl * .03, s.advAt - .3); s.adv = s.advAt; if (s.advN++ < 2) note(s, 'THE WALL ADVANCES', .7); Audio_.sfx.thud(); shake(.25); buzz(20); }
       if (s.b.some(k => k.hp && k.y + k.h >= GH - 14)) { s.why = 'THE WALL TOOK YOU'; return false; }
       // serve
       if (s.serve > 0) { s.serve -= dt; if (s.serve <= 0) s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: Math.random() < .5 ? -60 : 60, vy: -105 }); }
       // the pupil glares
       const pupils = s.b.filter(k => k.pupil && k.hp);
-      if (pupils.length && s.balls.length && s.t > 3) {
+      if (pupils.length && s.balls.length && s.t > 1.5) {
         s.glare -= dt;
-        if (s.glare <= 0) { s.bolts.push({ x: 79, y: pupils[0].y + 8, v: 85 + s.lvl * 8 }); s.glare = Math.max(1.2, rnd(2.4, 4) - s.lvl * .2); Audio_.sfx.shoot(); }
+        if (s.glare <= 0) { s.bolts.push({ x: 79, y: pupils[0].y + 8, v: 95 + s.lvl * 8 }); s.glare = Math.max(.9, rnd(1.6, 2.8) - s.lvl * .12); Audio_.sfx.shoot(); }
       }
       s.bolts.forEach(o => o.y += o.v * dt);
       for (const o of s.bolts) if (o.y > GH - 14 && o.y < GH - 6 && o.x + 2 > s.px && o.x < s.px + s.pw) { o.y = GH + 9; s.stun = .8; flash(); shake(.3); Audio_.sfx.hurt(); burst(o.x, GH - 10, 8); }
       s.bolts = s.bolts.filter(o => o.y < GH + 8);
       // the balls, in sub-steps so a fast ball cannot pass through a brick or the paddle
-      const speed = 150 * (1 + Math.min(.5, s.t / 36)) * s.boost * (1 + s.lvl * .05);
+      const speed = 150 * (1 + Math.min(.4, s.t / 16)) * s.boost * (1 + s.lvl * .05);
       for (const ball of s.balls) {
         setSpeed(ball, speed);
         const n = Math.ceil(speed * dt / 3), h = dt / n;
@@ -772,7 +773,7 @@ const Arena = (() => {
           if (ball.vy > 0 && ball.y > GH - 14 && ball.y < GH - 8 && ball.x > s.px - 2 && ball.x < s.px + s.pw + 2) {
             ball.vy = -Math.abs(ball.vy); ball.vx += ((ball.x - s.px) / s.pw - .5) * 160;
             const m = Math.hypot(ball.vx, ball.vy); if (Math.abs(ball.vy) < m * .35) { ball.vy = -m * .35; ball.vx = Math.sign(ball.vx || 1) * m * Math.sqrt(1 - .35 * .35); }
-            s.boost = Math.min(1.25, s.boost * 1.02); Audio_.sfx.blip();
+            s.boost = Math.min(1.2, s.boost * 1.02); Audio_.sfx.blip();
           }
           if (ball.y > GH + 4) { ball.lost = true; break; }
           for (const k of s.b) if (k.hp && ball.x > k.x - 1 && ball.x < k.x + k.w + 1 && ball.y > k.y - 1 && ball.y < k.y + k.h + 1) {
@@ -783,10 +784,10 @@ const Arena = (() => {
       }
       if (s.balls.some(b => b.lost)) {
         s.balls = s.balls.filter(b => !b.lost);
-        if (!s.balls.length) { s.lives--; Audio_.sfx.hurt(); flash(); shake(.3); if (!s.lives) { s.why = 'OUT OF BALLS'; return false; } s.serve = .8; s.boost = 1; }
+        if (!s.balls.length) { s.lives--; Audio_.sfx.hurt(); flash(); shake(.3); if (!s.lives) { s.why = 'OUT OF BALLS'; return false; } s.serve = .6; s.boost = 1; }
       }
-      // the second ball, within seconds
-      if (!s.split && (cleared >= .15 || s.t > 4) && s.balls.length) { s.split = true; const b0 = s.balls[0]; s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: -Math.sign(b0.vx || 1) * 70, vy: -100 }); note(s, 'SECOND BALL'); Audio_.sfx.smash(); }
+      // the second ball, almost at once
+      if (!s.split && (cleared >= .08 || s.t > 1.6) && s.balls.length) { s.split = true; const b0 = s.balls[0]; s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: -Math.sign(b0.vx || 1) * 70, vy: -100 }); note(s, 'SECOND BALL'); Audio_.sfx.smash(); }
       const low = Math.max(0, ...s.b.filter(k => k.hp).map(k => k.y + k.h)), broken = s.total - s.b.filter(k => k.hp).length;
       s.heat = broken / s.need * .8 + (s.lives === 1 ? .2 : 0); s.danger = s.lives === 1 || s.need - broken <= 3 || low >= GH - 14 - 21;
       if (broken >= s.need) { s.b.filter(k => k.hp).forEach(k => burst(k.x + k.w / 2, k.y + 3, 6, 80)); shake(.5); return true; }
@@ -805,34 +806,35 @@ const Arena = (() => {
   };
 
   // ---- 2. PURGE THE SWARM: watchers sweep in lines, dive at you and aim their shots,
-  //      thicker and faster with every kill; the first two seconds they only approach.
+  //      thicker and faster with every kill; for the first second they only approach.
   //      Twin cannon at half the quota; at the quota, the Warden: a great eye that
-  //      strafes faster as it is hurt, fires spreads at you and calls escorts. Three lives.
+  //      strafes faster as it is hurt, fires spreads at you and calls escorts. Three
+  //      lives. Six watchers and the Warden take a few seconds.
   const FOE = [['.#.....#.', '..#...#..', '.#######.', '##.###.##', '#########', '#.#...#.#', '#.#...#.#', '...#.#...'], ['.#.....#.', '#.#...#.#', '.#######.', '##.###.##', '#########', '..#...#..', '.#.....#.', '#.......#']];
   const SHIP = ['...##...', '...##...', '..####..', '.######.', '##.##.##', '#..##..#'];
   const WARDEN = Array.from({ length: 13 }, (_, j) => Array.from({ length: 25 }, (_, i) => { const dx = (i - 12) / 12.5, dy = (j - 6) / 6.5, r = dx * dx + dy * dy; return r <= 1 && !(r > .46 && r < .64) ? '#' : '.'; }).join(''));
   const SHMUP = {
-    name: 'PURGE THE SWARM', brief: lvl => `DESTROY ${12 + Math.floor(lvl / 2)} WATCHERS. THEN THE WARDEN.`, help: ['DRAG TO MOVE · HOLD TO FIRE', '← → MOVE · SPACE FIRE'],
-    init: lvl => ({ x: 76, shots: [], foes: [], eshots: [], kills: 0, need: 12 + Math.floor(lvl / 2), t: 0, cd: 0, spawn: .4, lives: 3, inv: 0, combo: 0, comboT: 0, twin: false, boss: null, heat: 0, danger: false }),
+    name: 'PURGE THE SWARM', brief: lvl => `DESTROY ${6 + Math.floor(lvl / 4)} WATCHERS. THEN THE WARDEN.`, help: ['DRAG TO MOVE · HOLD TO FIRE', '← → MOVE · SPACE FIRE'],
+    init: lvl => ({ x: 76, shots: [], foes: [], eshots: [], kills: 0, need: 6 + Math.floor(lvl / 4), t: 0, cd: 0, spawn: .2, lives: 3, inv: 0, combo: 0, comboT: 0, twin: false, boss: null, heat: 0, danger: false }),
     step: (s, dt) => {
       s.t += dt; s.cd -= dt; s.inv -= dt; s.spawn -= dt; s.comboT -= dt; s.x = paddleInput(s.x, 8, 210, dt);
       if (firing() && s.cd <= 0) { if (s.twin) s.shots.push({ x: s.x + 1, y: GH - 22 }, { x: s.x + 6, y: GH - 22 }); else s.shots.push({ x: s.x + 3.5, y: GH - 22 }); s.cd = s.twin ? .16 : .18; Audio_.sfx.shoot(); }
-      const k = s.kills, prog = Math.min(1, k / s.need), pace = 1 + s.lvl * .025, armed = s.t > 2;
+      const k = s.kills, prog = Math.min(1, k / s.need), pace = 1 + s.lvl * .025, armed = s.t > 1.2;
       let B = s.boss;
       if (!B && s.spawn <= 0) {
-        const n = Math.min(5, 2 + Math.floor(k / 4)), line = Math.random() < .35 + prog * .3, dir = Math.random() < .5 ? -1 : 1;
-        for (let i = 0; i < n; i++) s.foes.push(line ? { x: dir > 0 ? -10 - i * 14 : GW + 1 + i * 14, y: rnd(-6, 10), vx: dir * (50 + k * 4) * pace, f: i, dive: 0, line: 1 } : { x: rnd(2, GW - 11), y: -10 - i * 14, vx: rnd(-1, 1) * (36 + k * 4) * pace, f: Math.random() * 10, dive: 0 });
-        s.spawn = Math.max(.3, .8 - k * .035) / (1 + s.lvl * .02);
+        const n = Math.min(4, 2 + Math.floor(k / 3)), line = Math.random() < .35 + prog * .3, dir = Math.random() < .5 ? -1 : 1;
+        for (let i = 0; i < n; i++) s.foes.push(line ? { x: dir > 0 ? -10 - i * 14 : GW + 1 + i * 14, y: rnd(-6, 10), vx: dir * (55 + k * 6) * pace, f: i, dive: 0, line: 1 } : { x: rnd(2, GW - 11), y: -10 - i * 14, vx: rnd(-1, 1) * (40 + k * 6) * pace, f: Math.random() * 10, dive: 0 });
+        s.spawn = Math.max(.28, .6 - k * .05) / (1 + s.lvl * .02);
       }
       s.shots.forEach(p => p.y -= 250 * dt); s.shots = s.shots.filter(p => p.y > -4);
       for (const f of s.foes) {
-        if (!f.dive && armed && f.y > 30 && Math.random() < .002 + prog * .008) { f.dive = 1; Audio_.sfx.blip(); }
-        if (f.dive) { f.y += (115 + k * 4) * pace * dt; f.x += clamp((s.x - f.x) * 3, -80, 80) * dt; }
+        if (!f.dive && armed && f.y > 30 && Math.random() < .003 + prog * .01) { f.dive = 1; Audio_.sfx.blip(); }
+        if (f.dive) { f.y += (120 + k * 6) * pace * dt; f.x += clamp((s.x - f.x) * 3, -80, 80) * dt; }
         else {
-          f.y += (32 + k * 2.5) * pace * dt; f.x += f.vx * dt;
+          f.y += (40 + k * 5) * pace * dt; f.x += f.vx * dt;
           if (f.line && f.x > 0 && f.x < GW - 9) f.line = 0;
           if (!f.line && (f.x < 0 || f.x > GW - 9)) { f.x = clamp(f.x, 0, GW - 9); f.vx *= -1; }
-          if (armed && Math.random() < .005 + k * .0008) s.eshots.push({ x: f.x + 4, y: f.y + 8, vx: clamp((s.x - f.x) / 1.5, -65, 65), vy: (105 + k * 3) * pace });
+          if (armed && Math.random() < .006 + k * .0015) s.eshots.push({ x: f.x + 4, y: f.y + 8, vx: clamp((s.x - f.x) / 1.5, -65, 65), vy: (110 + k * 5) * pace });
         }
       }
       s.eshots.forEach(p => { p.y += p.vy * dt; p.x += p.vx * dt; }); s.eshots = s.eshots.filter(p => p.y < GH && p.x > -3 && p.x < GW + 3);
@@ -843,23 +845,23 @@ const Arena = (() => {
         if (!s.twin && s.kills >= s.need / 2) { s.twin = true; note(s, 'TWIN CANNON'); Audio_.sfx.smash(); }
       }
       s.foes = s.foes.filter(f => !f.d && f.y < GH && f.x > -100 && f.x < GW + 100);
-      if (!B && s.kills >= s.need) { const hp = 12 + s.lvl; B = s.boss = { x: 68, y: -16, hp, max: hp, t: 0, cd: 1.3, hurt: 0 }; s.foes = []; s.eshots = []; note(s, 'THE WARDEN COMES', 1.4); Audio_.sfx.thud(); shake(.4); buzz([40, 40, 80]); }
+      if (!B && s.kills >= s.need) { const hp = 5 + Math.floor(s.lvl / 4); B = s.boss = { x: 68, y: -16, hp, max: hp, t: 0, cd: .9, hurt: 0 }; s.foes = []; s.eshots = []; note(s, 'THE WARDEN COMES', 1); Audio_.sfx.thud(); shake(.4); buzz([40, 40, 80]); }
       if (B) {
         B.t += dt; B.cd -= dt; B.hurt -= dt;
         const rage = 1 - B.hp / B.max;
-        if (B.y < 18) B.y += 28 * dt; else { B.x = 68 + Math.sin(B.t * (1.4 + rage * 2) * pace) * 62 + Math.sin(B.t * 3.3) * 6; B.y = 18 + Math.sin(B.t * .8) * 7; }
+        if (B.y < 18) B.y += 40 * dt; else { B.x = 68 + Math.sin(B.t * (1.3 + rage * 1.6)) * 62 + Math.sin(B.t * 3.3) * 6; B.y = 18 + Math.sin(B.t * .8) * 7; }
         if (B.y >= 8 && B.cd <= 0) {
           const cx = B.x + 12, cy = B.y + 12, aim = clamp((s.x + 4 - cx) / 1.4, -60, 60);
-          for (const o of [-48, 0, 48]) s.eshots.push({ x: cx, y: cy, vx: aim + o, vy: (100 + rage * 35) * pace + s.lvl * 6 });
+          for (const o of [-48, 0, 48]) s.eshots.push({ x: cx, y: cy, vx: aim + o, vy: (105 + rage * 35) * pace + s.lvl * 6 });
           if (Math.random() < .5) s.foes.push({ x: cx - 4, y: cy, vx: rnd(-1, 1) * 50, f: 0, dive: 0 });
-          B.cd = Math.max(.42, 1.2 - rage * .7) / pace; Audio_.sfx.shoot();
+          B.cd = Math.max(.4, 1 - rage * .55) / pace; Audio_.sfx.shoot();
         }
         for (const p of s.shots) if (p.y > -1 && p.y > B.y && p.y < B.y + 13 && p.x > B.x && p.x < B.x + 25) { p.y = -99; B.hp--; B.hurt = .07; burst(p.x, B.y + 13, 3); Audio_.sfx.hit(); }
         if (B.hp <= 0) { burst(B.x + 12, B.y + 6, 50, 110); shake(.6); flash(); return true; }
       }
       const hit = s.eshots.some(p => p.x > s.x - 1 && p.x < s.x + 9 && p.y > GH - 20 && p.y < GH - 12) || s.foes.some(f => f.y + 8 > GH - 20 && f.y < GH - 12 && f.x < s.x + 8 && f.x + 9 > s.x);
       if (hit && s.inv <= 0) { s.lives--; s.inv = 1.4; flash(); shake(.3); Audio_.sfx.hurt(); burst(s.x + 4, GH - 15, 12); s.eshots = []; if (!s.lives) { s.why = B ? 'THE WARDEN STANDS' : 'TAKEN BY THE SWARM'; return false; } }
-      s.heat = B ? .7 + .3 * (1 - B.hp / B.max) : prog * .65; s.danger = s.lives === 1 || (!!B && B.hp <= 4);
+      s.heat = B ? .7 + .3 * (1 - B.hp / B.max) : prog * .65; s.danger = s.lives === 1 || (!!B && B.hp <= 2);
     },
     draw: s => {
       if (s.inv <= 0 || Math.floor(s.t * 14) % 2) sprite(SHIP, s.x, GH - 20);
@@ -880,37 +882,37 @@ const Arena = (() => {
   // ---- 3. OUTRUN THE STATIC: falling static and barred gates, then seekers that hunt
   //      your position (and commit to a column before they reach you), then lashes that
   //      whip in from the edges and cover half the screen; the last four seconds run
-  //      negative and a quarter faster. Fifteen seconds, a little more per tier. One
+  //      negative and a quarter faster. Seven seconds, a little more per tier. One
   //      life, so nothing is allowed to coincide with a gate in a way that leaves no
   //      room: static never spawns into a gate's gap it would arrive with, and a lash
   //      comes from the side that leaves the gap open.
   const DODGE = {
-    name: 'OUTRUN THE STATIC', brief: lvl => `SURVIVE ${15 + Math.min(4, Math.ceil(lvl / 2))} SECONDS. ONE LIFE.`, help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
-    init: lvl => ({ x: 76, rocks: [], bars: [], seekers: [], lashes: [], t: 0, goal: 15 + Math.min(4, Math.ceil(lvl / 2)), spawn: .3, bar: 2.2, seek: 1, lash: 1, near: 0, phase: 0, heat: 0, danger: false, inverted: false }),
+    name: 'OUTRUN THE STATIC', brief: lvl => `SURVIVE ${7 + Math.min(3, Math.ceil(lvl / 3))} SECONDS. ONE LIFE.`, help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
+    init: lvl => ({ x: 76, rocks: [], bars: [], seekers: [], lashes: [], t: 0, goal: 7 + Math.min(3, Math.ceil(lvl / 3)), spawn: .25, bar: 1.2, seek: .6, lash: .5, near: 0, phase: 0, heat: 0, danger: false, inverted: false }),
     step: (s, dt) => {
-      const od = s.t > s.goal - 4, m = (od ? 1.25 : 1) * (1 + s.lvl * .03);
+      const od = s.t > s.goal - 2.5, m = (od ? 1.25 : 1) * (1 + s.lvl * .02);
       s.t += dt; s.spawn -= dt * m; s.bar -= dt * m; s.seek -= dt; s.lash -= dt; s.x = paddleInput(s.x, 8, 215, dt);
-      if (s.phase < 1 && s.t > 4) { s.phase = 1; note(s, 'SEEKERS'); Audio_.sfx.thud(); }
-      if (s.phase < 2 && s.t > 8) { s.phase = 2; note(s, 'LASHES'); Audio_.sfx.thud(); }
-      if (s.phase < 3 && od) { s.phase = 3; s.inverted = true; note(s, 'OVERDRIVE'); Audio_.sfx.glitch(); shake(.4); buzz([30, 30, 30]); }
+      if (s.phase < 1 && s.t > 2) { s.phase = 1; note(s, 'SEEKERS', .7); Audio_.sfx.thud(); }
+      if (s.phase < 2 && s.t > 4) { s.phase = 2; note(s, 'LASHES', .7); Audio_.sfx.thud(); }
+      if (s.phase < 3 && od) { s.phase = 3; s.inverted = true; note(s, 'OVERDRIVE', .7); Audio_.sfx.glitch(); shake(.4); buzz([30, 30, 30]); }
       const py = GH - 16, arrives = o => (py - o.y) / o.v;                 // seconds until something reaches you
       if (s.spawn <= 0) {
-        const r = { x: rnd(0, GW - 6), y: -6, v: (70 + s.t * 8) * m, w: rnd(4, 10) | 0 };
+        const r = { x: rnd(0, GW - 6), y: -6, v: (80 + s.t * 14) * m, w: rnd(4, 10) | 0 };
         for (let i = 0; i < 4 && s.bars.some(b => Math.abs(arrives(b) - arrives(r)) < .45 && r.x + r.w > b.gap - 2 && r.x < b.gap + b.gw + 2); i++) r.x = rnd(0, GW - 6);
-        s.rocks.push(r); s.spawn = Math.max(.1, .36 - s.t * .017);
+        s.rocks.push(r); s.spawn = Math.max(.1, .3 - s.t * .03);
       }
-      if (s.bar <= 0) { const gw = Math.max(22, 30 + Math.max(0, 6 - s.t * .6) - s.lvl), gap = rnd(6, GW - gw - 6); s.bars.push({ y: -4, gap, gw, v: (50 + s.t * 3.5) * m }); s.bar = Math.max(1.2, rnd(2, 3.2) - s.t * .07); }
-      if (s.phase >= 1 && s.seek <= 0) { s.seekers.push({ x: rnd(4, GW - 12), y: -8, vy: (56 + s.t * 3) * m }); s.seek = Math.max(1.1, 2.4 - s.t * .08); }
+      if (s.bar <= 0) { const gw = Math.max(22, 30 + Math.max(0, 4 - s.t * .8) - s.lvl), gap = rnd(6, GW - gw - 6); s.bars.push({ y: -4, gap, gw, v: (60 + s.t * 7) * m }); s.bar = Math.max(1.1, rnd(1.5, 2.3) - s.t * .1); }
+      if (s.phase >= 1 && s.seek <= 0) { s.seekers.push({ x: rnd(4, GW - 12), y: -8, vy: (70 + s.t * 6) * m }); s.seek = Math.max(1, 1.8 - s.t * .1); }
       if (s.phase >= 2 && s.lash <= 0) {
-        const warn = Math.max(.45, .8 - s.t * .02), coming = s.bars.filter(b => arrives(b) > warn - .1).sort((a, b) => arrives(a) - arrives(b));   // the gates still to pass once the lash is out
+        const warn = Math.max(.45, .7 - s.t * .03), coming = s.bars.filter(b => arrives(b) > warn - .1).sort((a, b) => arrives(a) - arrives(b));   // the gates still to pass once the lash is out
         const bar = coming.find(b => arrives(b) < warn + 1.1) || coming[0];
         const side = bar ? (bar.gap + bar.gw / 2 < GW / 2 ? -1 : 1) : Math.random() < .5 ? 1 : -1;     // from the side that leaves the next gate's gap open
-        s.lashes.push({ side, t: 0, warn, len: 0 }); s.lash = Math.max(1.9, 3.2 - s.t * .08);
+        s.lashes.push({ side, t: 0, warn, len: 0 }); s.lash = Math.max(1.8, 2.4 - s.t * .1);
       }
       s.rocks.forEach(r => r.y += r.v * dt); s.rocks = s.rocks.filter(r => r.y < GH);
       s.bars.forEach(b => b.y += b.v * dt); s.bars = s.bars.filter(b => b.y < GH);
       for (const e of s.seekers) {
-        if (e.y < 150) e.x += clamp((s.x - e.x) * 2.5, -(58 + s.t * 2), 58 + s.t * 2) * dt;
+        if (e.y < 150) e.x += clamp((s.x - e.x) * 2.5, -(60 + s.t * 4), 60 + s.t * 4) * dt;
         else if (!e.set) {                                                // it commits to a column, veering clear of a gate's gap it would arrive with
           e.set = 1;
           for (const b of s.bars) if (Math.abs(arrives(b) - (py - e.y) / e.vy) < .5 && e.x + 8 > b.gap - 2 && e.x < b.gap + b.gw + 2) e.x = clamp(e.x + 4 < b.gap + b.gw / 2 ? b.gap - 10 : b.gap + b.gw + 2, 0, GW - 8);
@@ -940,7 +942,7 @@ const Arena = (() => {
   // ---- 4. RECITE THE SIGIL: nothing to dodge and nowhere to run. The eye flashes a
   //      sequence of four runes, two to begin with (more at higher tiers), one longer
   //      and faster every round; recite it back, in order, before the timer drains.
-  //      Five rounds. One wrong rune ends it.
+  //      Three rounds. One wrong rune ends it.
   const RUNES = [
     ['...#...', '..###..', '.#.#.#.', '#..#..#', '...#...', '...#...', '...#...'],   // up: the trident
     ['#.....#', '.#...#.', '..#.#..', '...#...', '..#.#..', '.#...#.', '#.....#'],   // right: the cross
@@ -950,8 +952,8 @@ const Arena = (() => {
   const RUNE_AT = [{ x: 80, y: 86 }, { x: 116, y: 122 }, { x: 80, y: 158 }, { x: 44, y: 122 }];   // centres: up, right, down, left
   const CENTRE = { x: 80, y: 122 };
   const SIGIL = {
-    name: 'RECITE THE SIGIL', brief: 'REPEAT THE SEQUENCE. 5 ROUNDS.', help: ['WATCH · THEN TAP THE RUNES IN ORDER', 'WATCH · THEN ↑ → ↓ ← OR W D S A IN ORDER'],
-    init: lvl => ({ seq: Array.from({ length: 1 + Math.min(2, Math.floor(lvl / 3)) }, () => Math.floor(Math.random() * 4)), round: 0, rounds: 5, phase: 'wait', t: .6, age: 0, i: 0, lit: -1, on: 0, show: .3, gap: .1, limit: 1.6, timer: 0, heat: 0, danger: false, look: CENTRE }),
+    name: 'RECITE THE SIGIL', brief: 'REPEAT THE SEQUENCE. 3 ROUNDS.', help: ['WATCH · THEN TAP THE RUNES IN ORDER', 'WATCH · THEN ↑ → ↓ ← OR W D S A IN ORDER'],
+    init: lvl => ({ seq: Array.from({ length: 1 + Math.min(2, Math.floor(lvl / 3)) }, () => Math.floor(Math.random() * 4)), round: 0, rounds: 3, phase: 'wait', t: .45, age: 0, i: 0, lit: -1, on: 0, show: .28, gap: .09, limit: 1.4, timer: 0, heat: 0, danger: false, look: CENTRE }),
     step: (s, dt) => {
       s.t -= dt; s.on -= dt; s.age += dt;
       if (s.on <= 0 && s.phase !== 'show') s.lit = -1;
@@ -960,8 +962,8 @@ const Arena = (() => {
       if (s.phase === 'wait') {                                       // between rounds: one more rune, then the eye recites
         if (s.t <= 0) {
           s.seq.push(Math.floor(Math.random() * 4)); s.round++; s.i = 0; s.phase = 'show'; s.t = .35;
-          s.show = Math.max(.15, .3 - s.round * .025 - s.lvl * .012); s.gap = Math.max(.05, .1 - s.round * .008); s.limit = Math.max(.7, 1.6 - s.round * .12 - s.lvl * .06);
-          note(s, `ROUND ${s.round}`, .6);
+          s.show = Math.max(.15, .28 - s.round * .03 - s.lvl * .012); s.gap = Math.max(.05, .09 - s.round * .01); s.limit = Math.max(.7, 1.4 - s.round * .15 - s.lvl * .06);
+          note(s, `ROUND ${s.round}`, .5);
         }
       } else if (s.phase === 'show') {
         if (s.t <= 0) {
@@ -978,12 +980,12 @@ const Arena = (() => {
           s.i++; s.timer = s.limit; Audio_.sfx.rune(d); burst(RUNE_AT[d].x, RUNE_AT[d].y, 6, 40);
           if (s.i >= s.seq.length) {
             if (s.round >= s.rounds) { flash(); return true; }
-            s.phase = 'wait'; s.t = .6; flash(); shake(.15); Audio_.sfx.smash(); buzz(15); break;
+            s.phase = 'wait'; s.t = .45; flash(); shake(.15); Audio_.sfx.smash(); buzz(15); break;
           }
         }
       }
       s.heat = (s.round - 1) / s.rounds + (s.phase === 'input' ? .1 : 0);
-      s.danger = s.round >= s.rounds - 1 || (s.phase === 'input' && s.timer < s.limit * .35);
+      s.danger = s.round >= s.rounds || (s.phase === 'input' && s.timer < s.limit * .35);
     },
     draw: s => {
       const L = s.lit >= 0 ? RUNE_AT[s.lit] : null;

@@ -93,12 +93,12 @@ async function autopilot(page, ms) {
   if (!skill2[lostGame] || skill2[lostGame].tier !== 0 || skill2[lostGame].lost !== 1) fail('the loss was not recorded: ' + JSON.stringify(skill2));
   if (await page.evaluate(() => JSON.parse(localStorage.getItem('gatekeeper.skill') || 'null') === null)) fail('skill is not kept in localStorage');
   console.log('skill:', JSON.stringify(skill2));
-  // every game, at tier 2, under the autopilot for a few seconds: no errors, and each one plays
+  // every game, at tier 2, under the autopilot for a moment (a trial is only a handful of seconds): no errors, and each one plays
   for (const name of await page.evaluate(() => GK.arena.GAMES.map(g => g.name))) {
     await page.evaluate(n => { window.__game = GK.arena.run(GK.arena.byName(n), 1); }, name);
     await page.waitForSelector('#stage.on', { timeout: 5000 });
     await page.keyboard.down('Space');
-    await autopilot(page, 6500);
+    await autopilot(page, 4000);
     await page.keyboard.up('Space');
     const st = await page.evaluate(() => { const s = GK.arena.current(); return s && { lvl: s.lvl, bricks: s.b && s.b.filter(k => k.hp).length, total: s.total, kills: s.kills, round: s.round, t: s.t, danger: s.danger, heat: s.heat }; });
     await page.screenshot({ path: join(OUT, `soak-${name.toLowerCase().replace(/ /g, '-')}.png`) });
