@@ -3,7 +3,7 @@
 Arena.define(({ GW, GH, px, text, shake, note, paddleInput }) => {
   // ---- 3. OUTRUN THE STATIC: falling static and barred gates, then seekers that hunt
   //      your position (and commit to a column before they reach you), then lashes that
-  //      whip in from the edges and cover half the screen; the last four seconds run
+  //      whip in from the edges and cover half the screen; the last 2.5 seconds run
   //      negative and a quarter faster. Seven seconds, a little more per tier. One
   //      life, so nothing is allowed to coincide with a gate in a way that leaves no
   //      room: static never spawns into a gate's gap it would arrive with, and a lash
@@ -31,22 +31,24 @@ Arena.define(({ GW, GH, px, text, shake, note, paddleInput }) => {
         const side = bar ? (bar.gap + bar.gw / 2 < GW / 2 ? -1 : 1) : Math.random() < .5 ? 1 : -1;     // from the side that leaves the next gate's gap open
         s.lashes.push({ side, t: 0, warn, len: 0 }); s.lash = Math.max(1.8, 2.4 - s.t * .1);
       }
-      s.rocks.forEach(r => r.y += r.v * dt); s.rocks = s.rocks.filter(r => r.y < GH);
-      s.bars.forEach(b => b.y += b.v * dt); s.bars = s.bars.filter(b => b.y < GH);
+      // what falls remembers where it was a frame ago (py) and hits along the way it came: late in a
+      // trial static falls over 300px/s, more than the player's height in one slow frame
+      s.rocks.forEach(r => { r.py = r.y; r.y += r.v * dt; }); s.rocks = s.rocks.filter(r => r.y < GH);
+      s.bars.forEach(b => { b.py = b.y; b.y += b.v * dt; }); s.bars = s.bars.filter(b => b.y < GH);
       for (const e of s.seekers) {
         if (e.y < 150) e.x += clamp((s.x - e.x) * 2.5, -(60 + s.t * 4), 60 + s.t * 4) * dt;
         else if (!e.set) {                                                // it commits to a column, veering clear of a gate's gap it would arrive with
           e.set = 1;
           for (const b of s.bars) if (Math.abs(arrives(b) - (py - e.y) / e.vy) < .5 && e.x + 8 > b.gap - 2 && e.x < b.gap + b.gw + 2) e.x = clamp(e.x + 4 < b.gap + b.gw / 2 ? b.gap - 10 : b.gap + b.gw + 2, 0, GW - 8);
         }
-        e.y += e.vy * dt;
+        e.py = e.y; e.y += e.vy * dt;
       }
       s.seekers = s.seekers.filter(e => e.y < GH);
       for (const L of s.lashes) { L.t += dt; const e = L.t - L.warn, R = GW / 2; L.len = e < 0 ? 0 : e < .3 ? e / .3 * R : e < .65 ? R : Math.max(0, 1 - (e - .65) / .35) * R; }
       s.lashes = s.lashes.filter(L => L.t < L.warn + 1.05);
-      for (const r of s.rocks) { const hitX = r.x < s.x + 8 && r.x + r.w > s.x, hitY = r.y + 6 > py && r.y < py + 8; if (hitX && hitY) { s.why = 'STRUCK BY STATIC'; return false; } if (!r.n && hitY && r.x < s.x + 14 && r.x + r.w > s.x - 6) { r.n = 1; Audio_.sfx.blip(); s.near++; } }
-      for (const b of s.bars) if (b.y + 3 > py && b.y < py + 8 && (s.x < b.gap || s.x + 8 > b.gap + b.gw)) { s.why = 'THE BAR TOOK YOU'; return false; }
-      for (const e of s.seekers) if (e.x < s.x + 8 && e.x + 8 > s.x && e.y + 8 > py && e.y < py + 8) { s.why = 'A SEEKER FOUND YOU'; return false; }
+      for (const r of s.rocks) { const hitX = r.x < s.x + 8 && r.x + r.w > s.x, hitY = r.y + 6 > py && r.py < py + 8; if (hitX && hitY) { s.why = 'STRUCK BY STATIC'; return false; } if (!r.n && hitY && r.x < s.x + 14 && r.x + r.w > s.x - 6) { r.n = 1; Audio_.sfx.blip(); s.near++; } }
+      for (const b of s.bars) if (b.y + 3 > py && b.py < py + 8 && (s.x < b.gap || s.x + 8 > b.gap + b.gw)) { s.why = 'THE BAR TOOK YOU'; return false; }
+      for (const e of s.seekers) if (e.x < s.x + 8 && e.x + 8 > s.x && e.y + 8 > py && e.py < py + 8) { s.why = 'A SEEKER FOUND YOU'; return false; }
       for (const L of s.lashes) if (L.len > 0 && (L.side > 0 ? s.x < L.len : s.x + 8 > GW - L.len)) { s.why = 'LASHED'; return false; }
       s.heat = s.t / s.goal; s.danger = od;
       if (s.t >= s.goal) return true;

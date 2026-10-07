@@ -138,6 +138,50 @@ async function autopilot(page, ms) {
     if (won !== true) fail(name + ' did not resolve as a win when ended');
   }
 
+  // the slowest frame the arena allows (dt .05), from every starting offset: nothing passes through anything
+  const slow = await page.evaluate(() => {
+    const G = n => GK.arena.byName(n), out = {}, DT = .05;
+    // a shot fired straight up at a watcher always kills it
+    out.shotMisses = 0;
+    for (let off = 0; off < 25; off++) {
+      const g = G('swarm'), s = g.init(0); s.lvl = 0; s.spawn = 99;
+      s.foes.push({ x: 70, y: 100, vx: 0, f: 0, dive: 0 }); s.shots.push({ x: 74, y: 125 + off });
+      for (let i = 0; i < 12 && !s.kills; i++) g.step(s, DT);
+      if (!s.kills) out.shotMisses++;
+    }
+    // static falling fast onto the player always strikes it
+    out.staticMisses = 0;
+    for (let off = 0; off < 25; off++) {
+      const g = G('static'), s = g.init(0); s.lvl = 0; s.goal = 99; s.spawn = s.bar = s.seek = s.lash = 99;
+      s.rocks.push({ x: s.x, y: 150 + off, v: 420, w: 6 });
+      let r; for (let i = 0; i < 12 && r === undefined; i++) r = g.step(s, DT);
+      if (r !== false) out.staticMisses++;
+    }
+    // a ball that comes in from a brick's side goes back the way it came, and the wall never swallows a ball
+    { const g = G('wall'), s = g.init(0); s.lvl = 0; s.serve = 99; s.split = true; s.adv = 99; s.glare = 99;
+      const k = s.b[0]; s.balls.push({ x: k.x - 4, y: k.y + 3, vx: 160, vy: -12 });
+      for (let i = 0; i < 6 && k.hp; i++) g.step(s, .016);
+      out.sideBounce = !k.hp && s.balls[0].vx < 0; }
+    { const g = G('wall'), s = g.init(0); s.lvl = 0; s.serve = 99; s.split = true; s.glare = 99;
+      const k = s.b.find(k => k.pupil); s.balls.push({ x: k.x + 8, y: k.y + k.h + 4, vx: 0.1, vy: 150 }); s.adv = 0;   // the wall comes down on it
+      g.step(s, .001); out.pupilHpAfterLanding = k.hp; out.ballClear = !s.b.some(b => b.hp && s.balls[0].x > b.x - 1 && s.balls[0].x < b.x + b.w + 1 && s.balls[0].y > b.y - 1 && s.balls[0].y < b.y + b.h + 1); }
+    return out;
+  });
+  console.log('slow frames:', JSON.stringify(slow));
+  if (slow.shotMisses) fail(`shots passed through a watcher from ${slow.shotMisses} of 25 offsets`);
+  if (slow.staticMisses) fail(`static passed through the player from ${slow.staticMisses} of 25 offsets`);
+  if (!slow.sideBounce) fail('a ball hitting a brick side did not bounce back');
+  if (slow.pupilHpAfterLanding !== 3 || !slow.ballClear) fail('the wall landing on a ball: ' + JSON.stringify(slow));
+  // a key held while the window loses focus is let go; so is one released with Shift down
+  const keysLetGo = await page.evaluate(async () => {
+    const g = GK.arena.byName('static'), s = g.init(0); s.lvl = 0; s.goal = 99; s.spawn = s.bar = s.seek = s.lash = 99;
+    dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' })); dispatchEvent(new Event('blur'));
+    const x0 = s.x; g.step(s, .05); const blurOk = s.x === x0;
+    dispatchEvent(new KeyboardEvent('keydown', { key: 'd' })); dispatchEvent(new KeyboardEvent('keyup', { key: 'D', shiftKey: true }));
+    const x1 = s.x; g.step(s, .05); return blurOk && s.x === x1;
+  });
+  if (!keysLetGo) fail('a key stayed held after blur or a Shift release');
+
   // the setup gear: opens the card; with no Claude Code the mock answers, and the dot is hollow
   await page.click('#setup-btn');
   await page.waitForSelector('#setup.on', { timeout: 3000 });
