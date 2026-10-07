@@ -1,10 +1,13 @@
 // End-to-end in the desktop app itself (Electron, driven by Playwright):
 //   1. no Claude Code on this machine: the mock answers, every game plays, the hidden panel
 //   2. Claude Code installed (a stand-in CLI on PATH): found on its own, linked, answers stream
+//   3. closing the window mid-answer quits the app and stops Claude Code and what it started
+//   4. the launcher: it starts the app, exits with it, and takes it down when it is stopped
 // On a Linux machine without a display, run it under xvfb-run:   xvfb-run -a npm run test:e2e
 import { _electron as electron } from 'playwright';
 import electronPath from 'electron';
-import { mkdir, mkdtemp, symlink, chmod } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, chmod, readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,11 +20,12 @@ const fail = msg => { console.error('FAIL:', msg); process.exitCode = 1; };
 
 // A clean machine: its own user data, a HOME with nothing installed, no API key, no ORACLE,
 // and a PATH holding only node plus whatever `extra` adds.
-async function launch(name, extra = []) {
+async function launch(name, extra = [], more = {}) {
   const base = await mkdtemp(join(tmpdir(), `gk-e2e-${name}-`));
   const nodeDir = join(base, 'node'); await mkdir(nodeDir); await symlink(process.execPath, join(nodeDir, 'node'));
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|ORACLE$|CLAUDE_BIN$|REPO$|MODEL$)/.test(k)));
   Object.assign(env, { HOME: join(base, 'home'), GATEKEEPER_USER_DATA: join(base, 'user-data'), GATEKEEPER_SHELL_ENV: '0', PATH: [...extra, nodeDir, '/usr/bin', '/bin'].join(delimiter) });
+  Object.assign(env, more);
   await mkdir(env.HOME);
   const args = [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--autoplay-policy=no-user-gesture-required', root];
   const app = await electron.launch({ executablePath: electronPath, args, env, cwd: root });
@@ -265,6 +269,46 @@ async function autopilot(page, ms) {
   console.log('claude code:', claude, '|', stamp, '|', text);
   await page.screenshot({ path: join(OUT, 'claude-answer.png') });
   await app.close();
+}
+
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const until = async (fn, ms) => { const t0 = Date.now(); while (!(await fn()) && Date.now() - t0 < ms) await sleep(100); return fn(); };
+const fakeBin = async () => { const d = await mkdtemp(join(tmpdir(), 'gk-e2e-bin-')); const f = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(f, 0o755); await symlink(f, join(d, 'claude')); return d; };
+
+// 3. a question in progress, then the window is closed: the app quits, and claude and its child go with it
+{
+  const pidsFile = join(await mkdtemp(join(tmpdir(), 'gk-e2e-pids-')), 'pids.log');
+  const { app, page } = await launch('close', [await fakeBin()], { FAKE_CLAUDE_PIDS: pidsFile });
+  const appPid = app.process().pid;
+  await page.click('#wake'); await sleep(1500);
+  page.evaluate(() => GK.askClaude('HANG on this').catch(() => {})).catch(() => {});   // it never answers; it ends when the window does
+  const pids = await until(async () => { try { return JSON.parse((await readFile(pidsFile, 'utf8')).trim().split('\n').pop()); } catch { return null; } }, 10000);
+  if (!pids || !alive(pids.claude) || !alive(pids.child)) fail('the hanging question never started: ' + JSON.stringify(pids));
+  const exited = new Promise(r => app.process().once('exit', r));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  const quit = await Promise.race([exited.then(() => true), sleep(15000).then(() => false)]);
+  const left = await until(() => ![pids.claude, pids.child].some(alive), 5000);
+  if (!quit || alive(appPid)) fail('closing the window did not quit the app');
+  if (!left) fail(`left running after the app closed: ${[pids.claude, pids.child].filter(alive).join(', ')}`);
+  console.log('window closed mid-answer: app quit', quit, '| claude and its child stopped', left);
+}
+
+// 4. the launcher, both ways: the app quits and the launcher follows; the launcher is stopped and the app follows
+for (const how of ['app quits', 'launcher stopped']) {
+  const base = await mkdtemp(join(tmpdir(), 'gk-e2e-launch-'));
+  const env = { ...process.env, GATEKEEPER_USER_DATA: join(base, 'ud'), GATEKEEPER_SHELL_ENV: '0', ORACLE: 'mock' };
+  const launcher = spawn(process.execPath, [join(root, 'desktop', 'launch.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = ''; launcher.stdout.on('data', d => { log += d; }); launcher.stderr.on('data', d => { log += d; });
+  const ready = await until(() => /settings:/.test(log), 30000);
+  const appPid = Number((log.match(/started \(pid (\d+)\)/) || [])[1]);
+  if (!ready || !appPid) { fail(`${how}: the launcher did not start the app:\n${log}`); launcher.kill('SIGKILL'); continue; }
+  const exited = new Promise(r => launcher.once('exit', code => r(code)));
+  process.kill(how === 'app quits' ? appPid : launcher.pid, 'SIGTERM');
+  const code = await Promise.race([exited, sleep(15000).then(() => 'timeout')]);
+  const appGone = await until(() => !alive(appPid), 5000);
+  if (code === 'timeout') fail(`${how}: the launcher did not exit`);
+  if (!appGone) fail(`${how}: the app outlived the launcher`);
+  console.log(`launcher, ${how}: launcher exit ${code} | app gone ${appGone}`);
 }
 
 console.log('errors:', errors.length ? errors : 'none');

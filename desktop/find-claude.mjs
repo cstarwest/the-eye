@@ -7,7 +7,7 @@
 //   findClaude()      resolves { path, command, args, version } for the first `claude`
 //                     that answers --version, or null (pass `tried: []` to
 //                     collect why each candidate was passed over)
-import { spawn } from 'node:child_process';
+import { spawnTracked, killTree } from './processes.mjs';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, isAbsolute } from 'node:path';
@@ -19,8 +19,8 @@ function run(command, args, { env, timeout }) {
   return new Promise(res => {
     let out = '', done = false, child, timer;
     const finish = code => { if (!done) { done = true; clearTimeout(timer); res({ code, out }); } };
-    try { child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); } catch { return finish(-1); }
-    timer = setTimeout(() => { child.kill(); finish(-1); }, timeout);
+    try { child = spawnTracked(command, args, { env, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return finish(-1); }
+    timer = setTimeout(() => { killTree(child); finish(-1); }, timeout);
     child.stdout.on('data', d => { if (out.length < 1e6) out += d; });
     child.on('error', () => finish(-1));
     child.on('close', code => finish(code));

@@ -3,7 +3,7 @@
 // checked both lexically and through realpath (symlinks). Files that look like
 // secrets are never returned. Git runs with an argument allowlist.
 import { promises as fs } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawnTracked, killTree } from './processes.mjs';
 import nodePath from 'node:path';
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '.cache', 'target', 'vendor', '__pycache__', '.venv', 'venv', '.idea', '.vscode', '.turbo']);
@@ -13,13 +13,16 @@ const MAX_OUT = 40_000;
 
 export function run(cmd, args, { cwd, timeout = 20_000, maxOut = MAX_OUT, signal } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal });
+    if (signal?.aborted) return reject(new Error('aborted'));
+    const child = spawnTracked(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '', cut = false;
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`${cmd} timed out`)); }, timeout);
+    const onAbort = () => { killTree(child); reject(new Error('aborted')); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => { killTree(child); reject(new Error(`${cmd} timed out`)); }, timeout);
     child.stdout.on('data', d => { if (out.length < maxOut) out += d; else cut = true; });
     child.stderr.on('data', d => { if (err.length < 4000) err += d; });
-    child.on('error', e => { clearTimeout(timer); reject(e); });
-    child.on('close', code => { clearTimeout(timer); resolve({ code, out: cut ? out.slice(0, maxOut) + '\n… (output truncated)' : out, err }); });
+    child.on('error', e => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(e); });
+    child.on('close', code => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); resolve({ code, out: cut ? out.slice(0, maxOut) + '\n… (output truncated)' : out, err }); });
   });
 }
 

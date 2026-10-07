@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Stand-in for the `claude` CLI: prints the stream-json shapes the real one
 // prints in `-p --output-format stream-json --include-partial-messages` mode.
-// Records its argv to FAKE_CLAUDE_LOG when set. A question containing FAIL exits 1.
+// Records its argv to FAKE_CLAUDE_LOG when set. A question containing FAIL exits 1; one
+// containing HANG starts a child of its own, writes both pids to FAKE_CLAUDE_PIDS and never answers.
 import { appendFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -13,6 +14,14 @@ const session = resumed || 'sess-' + Math.random().toString(36).slice(2, 8);
 const out = o => process.stdout.write(JSON.stringify(o) + '\n');
 
 if (/FAIL/.test(q)) { process.stderr.write('simulated failure\n'); process.exit(1); }
+// HANG: start a long-lived child of its own (as real tools and MCP servers are), record both pids, never answer
+if (/HANG/.test(q)) {
+  const { spawn } = await import('node:child_process');
+  const kid = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  if (process.env.FAKE_CLAUDE_PIDS) appendFileSync(process.env.FAKE_CLAUDE_PIDS, JSON.stringify({ claude: process.pid, child: kid.pid }) + '\n');
+  out({ type: 'system', subtype: 'init', session_id: 'sess-hang', cwd: process.cwd() });
+  setInterval(() => {}, 1000);
+} else {
 out({ type: 'system', subtype: 'init', session_id: session, cwd: process.cwd() });
 out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: process.cwd() + '/src/main.ts' } }] } });
 out({ type: 'system', subtype: 'task_summary', detail: 'Reading main.ts' });
@@ -23,3 +32,4 @@ for (const part of answer.match(/.{1,9}/g)) out({ type: 'stream_event', event: {
 out({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
 out({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: answer }] } });
 out({ type: 'result', subtype: 'success', is_error: false, result: answer, session_id: session, total_cost_usd: 0 });
+}

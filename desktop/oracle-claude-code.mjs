@@ -1,7 +1,7 @@
 // Claude Code oracle: runs `claude -p` headlessly in the repository, streaming
 // its stream-json output. Each page session maps to a Claude Code session that
 // is resumed on the next question, so the gatekeeper remembers the conversation.
-import { spawn } from 'node:child_process';
+import { spawnTracked, killTree } from './processes.mjs';
 import { createInterface } from 'node:readline';
 import { PERSONA } from './persona.mjs';
 
@@ -25,11 +25,11 @@ export function createClaudeCodeOracle(cfg) {
         const prior = sessions.get(session);
         if (prior) args.push('--resume', prior);
         const env = { ...process.env }; delete env.CLAUDECODE;   // allow launching from inside another Claude Code session
-        const child = spawn(bin, args, { cwd: cfg.repo, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+        const child = spawnTracked(bin, args, { cwd: cfg.repo, env, stdio: ['ignore', 'pipe', 'pipe'] });   // its own group: stopping it stops what it started
         let streamed = '', assistantText = '', resultText = null, isError = false, stderr = '', sawTextBlock = false, settled = false;
         const finish = (err, answer) => { if (settled) return; settled = true; clearTimeout(timer); err ? reject(err) : resolve({ answer }); };
-        const timer = setTimeout(() => { child.kill(); finish(new Error('the session took too long')); }, cfg.timeoutMs || 300_000);
-        const onAbort = () => { child.kill(); finish(new Error('aborted')); };
+        const timer = setTimeout(() => { killTree(child); finish(new Error('the session took too long')); }, cfg.timeoutMs || 300_000);
+        const onAbort = () => { killTree(child); finish(new Error('aborted')); };
         signal?.addEventListener('abort', onAbort, { once: true });
         child.stderr.on('data', d => { if (stderr.length < 4000) stderr += d; });
         child.on('error', e => finish(e.code === 'ENOENT' ? new Error(`cannot find the claude command (${bin}); install Claude Code or set CLAUDE_BIN or "claudeBin" in the settings file`) : e));
