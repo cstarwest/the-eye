@@ -208,8 +208,8 @@ async function autopilot(page, ms) {
   if (!r || !r.ok || r.oracle !== 'CLAUDE CODE') fail('find again: ' + JSON.stringify(r));
   await page.keyboard.press('Escape');
   await page.fill('#q', 'where is the answer?'); await page.press('#q', 'Enter');
-  await page.waitForSelector('#stage.on', { timeout: 15000 }); await sleep(1500);
-  await page.evaluate(() => GK.arena.end(true));
+  await page.waitForFunction(() => GK.arena.current(), null, { timeout: 15000 });   // past the countdown: the game is live
+  await page.evaluate(() => GK.arena.end(true));   // at once: unplayed, a first-tier trial can be lost in a second or two
   await page.waitForSelector('#answer.on', { timeout: 20000 });
   await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
   const text = await page.textContent('#abody'), stamp = await page.textContent('#astamp');
