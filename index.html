@@ -58,6 +58,9 @@
   #gc { position: absolute; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; box-shadow: 0 0 0 1px #222, 0 0 80px #000; }
   #gtitle { position: absolute; left: 0; right: 0; text-align: center; color: #fff; font-size: 11px; letter-spacing: .36em; opacity: .75; pointer-events: none; }
   #ghelp { position: absolute; left: 0; right: 0; text-align: center; color: #666; font-size: 10px; letter-spacing: .22em; pointer-events: none; }
+  #stage.danger #gc { animation: danger .5s ease-in-out infinite alternate; }
+  #stage.danger #gtitle { color: var(--red); opacity: 1; text-shadow: 0 0 12px var(--red); }
+  @keyframes danger { from { box-shadow: 0 0 0 1px #3a0000, 0 0 40px #000 } to { box-shadow: 0 0 0 2px var(--red), 0 0 120px #7a0000, 0 0 30px var(--red) } }
 
   /* ---- wake screen ---- */
   #wake { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; background: #000; color: var(--red); letter-spacing: .5em; font-size: 12px; cursor: pointer; transition: opacity 1.2s; }
@@ -67,7 +70,7 @@
   #wake small { letter-spacing: .3em; font-size: 10px; color: #5a2a2a; }
 
   @media (max-height: 520px) { #answer { bottom: calc(128px + env(safe-area-inset-bottom)); max-height: 34vh; } }
-  @media (prefers-reduced-motion: reduce) { body.shake { animation: none } #glitch.on { animation-duration: .25s } }
+  @media (prefers-reduced-motion: reduce) { body.shake { animation: none } #glitch.on { animation-duration: .25s } #stage.danger #gc { animation: none; box-shadow: 0 0 0 2px var(--red), 0 0 80px #5a0000 } }
 </style>
 </head>
 <body>
@@ -112,7 +115,7 @@ const CONFIG = {
   key: new URLSearchParams(location.search).get('key') || null,   // sent as x-gatekeeper-key when set
   session: (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0, 8),
   oracle: null,                                                    // label reported by the bridge's /health
-  voice: { pitch: 0.35, rate: 0.82 },
+  voice: { pitch: 0.15, rate: 0.8 },      // as deep as the engine allows; the demon layer underneath does the rest
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
 };
 const $ = id => document.getElementById(id);
@@ -129,7 +132,7 @@ const buzz = pattern => { try { navigator.vibrate && navigator.vibrate(pattern);
 // also feeds the analyser that drives the waveform bar).
 const Audio_ = (() => {
   let AC, master, analyser, music, sfxBus, voiceBus, verbSend, noiseBuf;
-  let drone = null, beat = null, intensity = 0;
+  let drone = null, beat = null, intensity = 0, danger = false;
   const heart = { at: 0, per: 1400 };            // when the last thump landed (perf.now ms) and the period
 
   function init() {
@@ -205,9 +208,10 @@ const Audio_ = (() => {
     intensity = clamp(v, 0, 1);
     if (!drone) return;
     const t = AC.currentTime;
-    drone.lp.frequency.cancelScheduledValues(t); drone.lp.frequency.linearRampToValueAtTime(180 + intensity * 700, t + 1.5);
-    drone.g.gain.cancelScheduledValues(t); drone.g.gain.linearRampToValueAtTime(.42 + intensity * .22, t + 1.5);
+    const ramp = (p, to) => { p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.linearRampToValueAtTime(to, t + 1.5); };
+    ramp(drone.lp.frequency, 180 + intensity * 900); ramp(drone.g.gain, .42 + intensity * .26);
   }
+  function setDanger(v) { danger = !!v; }      // the beat grows an alarm while a game is on its last life
   function stopDrone() {
     if (!drone) return;
     const d = drone; drone = null; clearTimeout(d.hb); clearTimeout(d.hit);
@@ -215,7 +219,8 @@ const Audio_ = (() => {
     setTimeout(() => d.nodes.forEach(n => { try { n.stop(); } catch (e) {} }), 2200);
   }
 
-  // ---- combat pulse: an 8th-note bass sequence whose tempo follows `intensity`
+  // ---- combat pulse: an 8th-note bass sequence under a kick, whose tempo follows `intensity`;
+  //      hats double at high intensity and a two-tone alarm joins while `danger` is set.
   const SEQ = [0, 0, 3, 0, 5, 0, 3, 2, 0, 0, 3, 0, 7, 6, 3, 2];
   function startBeat() {
     if (!AC || beat) return;
@@ -223,7 +228,7 @@ const Audio_ = (() => {
     beat = { timer: 0 };
     const tick = () => {
       if (!beat) return;
-      const step = 60 / (112 + intensity * 56) / 2;
+      const step = 60 / (116 + intensity * 64) / 2;
       while (next < AC.currentTime + .25) {
         const f = 55 * Math.pow(2, SEQ[i % SEQ.length] / 12);
         const o = AC.createOscillator(); o.type = 'square'; o.frequency.value = f;
@@ -231,10 +236,21 @@ const Audio_ = (() => {
         const fl = AC.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.setValueAtTime(900, next); fl.frequency.exponentialRampToValueAtTime(140, next + step * .9);
         const g = AC.createGain(); g.gain.setValueAtTime(0, next); g.gain.linearRampToValueAtTime(i % 4 === 0 ? .2 : .12, next + .01); g.gain.exponentialRampToValueAtTime(.001, next + step * .95);
         o.connect(fl); o2.connect(fl); fl.connect(g); g.connect(music); o.start(next); o2.start(next); o.stop(next + step); o2.stop(next + step);
-        if (i % 8 === 4) {
+        if (i % 8 === 0) {   // kick
+          const ko = AC.createOscillator(); ko.type = 'sine'; ko.frequency.setValueAtTime(130, next); ko.frequency.exponentialRampToValueAtTime(38, next + .12);
+          const kg = AC.createGain(); kg.gain.setValueAtTime(.5, next); kg.gain.exponentialRampToValueAtTime(.001, next + .22);
+          ko.connect(kg); kg.connect(music); ko.start(next); ko.stop(next + .25);
+        }
+        if (i % 8 === 4 || (intensity > .8 && i % 2 === 1)) {   // hats
           const n = AC.createBufferSource(); n.buffer = noiseBuf; const hf = AC.createBiquadFilter(); hf.type = 'highpass'; hf.frequency.value = 5000;
-          const hg = AC.createGain(); hg.gain.setValueAtTime(.07, next); hg.gain.exponentialRampToValueAtTime(.001, next + .05);
+          const hg = AC.createGain(); hg.gain.setValueAtTime(i % 8 === 4 ? .07 : .03, next); hg.gain.exponentialRampToValueAtTime(.001, next + .05);
           n.connect(hf); hf.connect(hg); hg.connect(music); n.start(next); n.stop(next + .06);
+        }
+        if (danger && i % 8 === 6) {   // alarm
+          const a = AC.createOscillator(); a.type = 'sawtooth'; a.frequency.setValueAtTime(1180, next); a.frequency.exponentialRampToValueAtTime(880, next + step * 1.6);
+          const af = AC.createBiquadFilter(); af.type = 'bandpass'; af.frequency.value = 1000; af.Q.value = 3;
+          const ag = AC.createGain(); ag.gain.setValueAtTime(.06, next); ag.gain.exponentialRampToValueAtTime(.001, next + step * 1.8);
+          a.connect(af); af.connect(ag); ag.connect(music); ag.connect(verbSend); a.start(next); a.stop(next + step * 2);
         }
         next += step; i++;
       }
@@ -272,18 +288,22 @@ const Audio_ = (() => {
     thud:   guard(() => { tone('sine', 70, 28, .6, .9, music); rumble(.6, .25); }),
     glitch: guard(() => rumble(.45, .35, 1800)),
     ignite: guard(() => { tone('sawtooth', 30, 110, 2.5, .25, music); rumble(2.5, .2, 220); }),
+    rune:   guard(i => { const f = [196, 247, 294, 392][i] || 196; tone('square', f, f, .18, .14); tone('square', f * 2.01, f * 2.01, .12, .04); }),
   };
 
   async function resume() { if (AC && AC.state === 'suspended') await AC.resume(); }
-  return { init, resume, ctx: () => AC, analyser: () => analyser, voiceBus: () => voiceBus, send: () => verbSend,
-           startDrone, stopDrone, setIntensity, startBeat, stopBeat, sfx, heart };
+  return { init, resume, ctx: () => AC, analyser: () => analyser, voiceBus: () => voiceBus, send: () => verbSend, noise: () => noiseBuf,
+           startDrone, stopDrone, setIntensity, setDanger, startBeat, stopBeat, sfx, heart };
 })();
 
 // ------------------------------ VOICE --------------------------------
-// speechSynthesis pitched down, with a synthesized mechanical layer underneath
-// (saw + square -> tanh distortion -> lowpass -> flutter -> reverb) that is pulsed
-// on every word boundary, so it reads as a machine even where pitch is ignored
-// (iOS). Subtitles are typed in sync with the words.
+// speechSynthesis pitched as low as it goes, over a synthesized demon layer:
+// detuned sub-bass saws ring-modulated and driven into an asymmetric clipper,
+// split into a chest lowpass and a throat bandpass whose formant jumps on every
+// word, with a pitch wobble and a tremor, into the reverb. It is pulsed on every
+// word boundary with a crackle of static, so the voice reads as something
+// inhuman even where the engine ignores pitch (iOS). Subtitles are typed in
+// sync with the words.
 const Voice = (() => {
   let speaking = false, voices = [];
   const lineEl = $('line');
@@ -291,7 +311,7 @@ const Voice = (() => {
   function loadVoices() { if (hasTTS) voices = speechSynthesis.getVoices(); }
   if (hasTTS) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
   function pickVoice() {
-    const pref = ['Daniel', 'Microsoft David', 'Microsoft Guy', 'Microsoft Mark', 'Google UK English Male', 'Fred', 'Rishi', 'Alex', 'Aaron', 'en-GB', 'en-US', 'en'];
+    const pref = ['Daniel', 'Microsoft David', 'Microsoft George', 'Microsoft Ryan', 'Microsoft Guy', 'Microsoft Mark', 'Google UK English Male', 'Arthur', 'Oliver', 'Fred', 'Rishi', 'Alex', 'Aaron', 'en-GB', 'en-US', 'en'];
     for (const p of pref) { const v = voices.find(v => (v.name + ' ' + v.lang).includes(p)); if (v) return v; }
     return voices[0] || null;
   }
@@ -304,30 +324,48 @@ const Voice = (() => {
 
   function growl(ms) {
     const AC = Audio_.ctx(); if (!AC) return null;
-    const t = AC.currentTime;
-    const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 46;
-    const o2 = AC.createOscillator(); o2.type = 'square'; o2.frequency.value = 92.5;
-    const trem = AC.createOscillator(); trem.frequency.value = 27;
-    const tg = AC.createGain(); tg.gain.value = .35;
-    const ws = AC.createWaveShaper(); const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) curve[i] = Math.tanh((i / 128 - 1) * 6); ws.curve = curve;
-    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 2;
+    const t = AC.currentTime, bus = Audio_.voiceBus(), send = Audio_.send();
+    // source: two sub-bass saws a few cents apart and a square an octave up, all wobbling together
+    const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 41;
+    const o2 = AC.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = 41.6;
+    const o3 = AC.createOscillator(); o3.type = 'square'; o3.frequency.value = 82.4;
+    const wob = AC.createOscillator(); wob.frequency.value = 5.3; const wobG = AC.createGain(); wobG.gain.value = 1.6;
+    wob.connect(wobG); [o, o2, o3].forEach(x => wobG.connect(x.frequency));
+    const pre = AC.createGain(); pre.gain.value = .5; o.connect(pre); o2.connect(pre); o3.connect(pre);
+    // ring modulation against a 38 Hz carrier, mixed with the dry signal, then an asymmetric clipper
+    const ring = AC.createGain(); ring.gain.value = 0; const car = AC.createOscillator(); car.frequency.value = 38; car.connect(ring.gain); pre.connect(ring);
+    const ws = AC.createWaveShaper(); const curve = new Float32Array(512);
+    for (let i = 0; i < 512; i++) { const x = i / 256 - 1; curve[i] = Math.tanh(x * 9 + x * x * 1.5) * .9; } ws.curve = curve; ws.oversample = '2x';
+    pre.connect(ws); ring.connect(ws);
+    // chest and throat
+    const chest = AC.createBiquadFilter(); chest.type = 'lowpass'; chest.frequency.value = 360; chest.Q.value = 3;
+    const throat = AC.createBiquadFilter(); throat.type = 'bandpass'; throat.frequency.value = 480; throat.Q.value = 5;
+    const throatG = AC.createGain(); throatG.gain.value = .9;
+    ws.connect(chest); ws.connect(throat); throat.connect(throatG);
+    const trem = AC.createOscillator(); trem.frequency.value = 27; const tg = AC.createGain(); tg.gain.value = .35;
     const mod = AC.createGain(); mod.gain.value = 1; trem.connect(tg); tg.connect(mod.gain);
-    const amp = AC.createGain(); amp.gain.value = 0;
-    o.connect(ws); o2.connect(ws); ws.connect(lp); lp.connect(mod); mod.connect(amp); amp.connect(Audio_.voiceBus()); amp.connect(Audio_.send());
-    o.start(); o2.start(); trem.start();
-    amp.gain.linearRampToValueAtTime(.07, t + .12);
+    chest.connect(mod); throatG.connect(mod);
+    const amp = AC.createGain(); amp.gain.value = 0; mod.connect(amp); amp.connect(bus); amp.connect(send);
+    const nodes = [o, o2, o3, wob, car, trem]; nodes.forEach(n => n.start());
+    amp.gain.linearRampToValueAtTime(.09, t + .12);
     let ended = false;
     const end = () => {
       if (ended) return; ended = true; clearTimeout(cap);
-      const t2 = AC.currentTime; amp.gain.cancelScheduledValues(t2); amp.gain.setValueAtTime(amp.gain.value, t2); amp.gain.linearRampToValueAtTime(0, t2 + .25);
-      setTimeout(() => [o, o2, trem].forEach(n => { try { n.stop(); } catch (e) {} }), 400);
+      const t2 = AC.currentTime; amp.gain.cancelScheduledValues(t2); amp.gain.setValueAtTime(amp.gain.value, t2); amp.gain.linearRampToValueAtTime(0, t2 + .3);
+      setTimeout(() => nodes.forEach(n => { try { n.stop(); } catch (e) {} }), 450);
     };
+    const FORMANTS = [320, 470, 640, 860, 1100];
     const pulse = () => {
       if (ended) return;
       const t2 = AC.currentTime; amp.gain.cancelScheduledValues(t2); amp.gain.setValueAtTime(amp.gain.value, t2);
-      amp.gain.linearRampToValueAtTime(.16, t2 + .04); amp.gain.linearRampToValueAtTime(.07, t2 + .22);
-      o.frequency.setValueAtTime(40 + Math.random() * 14, t2);
+      amp.gain.linearRampToValueAtTime(.22, t2 + .035); amp.gain.linearRampToValueAtTime(.09, t2 + .24);
+      const f0 = 36 + Math.random() * 12; o.frequency.setValueAtTime(f0, t2); o2.frequency.setValueAtTime(f0 * 1.014, t2); o3.frequency.setValueAtTime(f0 * 2.01, t2);
+      throat.frequency.cancelScheduledValues(t2); throat.frequency.setValueAtTime(pick(FORMANTS), t2); throat.frequency.exponentialRampToValueAtTime(380, t2 + .3);
+      // a crackle of static under each word
+      const n = AC.createBufferSource(); n.buffer = Audio_.noise(); n.playbackRate.value = rnd(.6, 1.4);
+      const nf = AC.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = rnd(1400, 3200); nf.Q.value = 1.2;
+      const ng = AC.createGain(); ng.gain.setValueAtTime(.05, t2); ng.gain.exponentialRampToValueAtTime(.0005, t2 + .09);
+      n.connect(nf); nf.connect(ng); ng.connect(bus); n.start(t2, Math.random() * 1.5); n.stop(t2 + .1);
     };
     const cap = setTimeout(end, ms + 2500);
     return { end, pulse };
@@ -568,19 +606,34 @@ const Eye = (() => {
 
 // ------------------------------ ARENA --------------------------------
 // One-bit games on a 160x240 logical canvas, letterboxed at an integer scale.
-// A game is { name, help, init() -> state, step(state, dt) -> true (win) |
-// false (lose) | undefined (continue), draw(state) }. Pure black and white;
-// danger is shown by inverting the screen, never by colour.
+// A game is { name, brief, help, init(level) -> state, step(state, dt) -> true
+// (win) | false (lose) | undefined (continue), draw(state) }. `level` is how
+// many trials the player has already won; every game gets harder with it, and
+// every game escalates while it runs. Optional state fields the arena reads:
+// `heat` (0..1, the music climbs with it), `danger` (the frame pulses red and
+// an alarm joins the beat), `look` ({x, y} in arena pixels: where the eye
+// behind the arena stares; otherwise it follows `px` / `x`), `inverted` (draw
+// the whole screen negative) and `why` (a line under TERMINATED). Pure black
+// and white: danger is shown by inverting the screen, never by colour.
 const Arena = (() => {
   const GW = 160, GH = 240;
   const stage = $('stage'), gc = $('gc'), g = gc.getContext('2d'), title = $('gtitle'), help = $('ghelp');
   gc.width = GW; gc.height = GH;
-  const keys = {}; let pointerX = null, invert = 0, shakeT = 0, particles = [], resolveNow = null;
-  addEventListener('keydown', e => { keys[e.key] = true; if (stage.classList.contains('on') && [' ', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); });
+  const keys = {}; let pointerX = null, invert = 0, shakeT = 0, particles = [], resolveNow = null, current = null;
+  // Discrete inputs since the last frame, as directions: 0 up · 1 right · 2 down · 3 left
+  // (arrows / WASD, or a tap, read by its quadrant around the centre of the arena).
+  let taps = [];
+  const DIRS = { ArrowUp: 0, w: 0, W: 0, ArrowRight: 1, d: 1, D: 1, ArrowDown: 2, s: 2, S: 2, ArrowLeft: 3, a: 3, A: 3 };
+  addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (!stage.classList.contains('on')) return;
+    if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+    if (!e.repeat && e.key in DIRS) taps.push(DIRS[e.key]);
+  });
   addEventListener('keyup', e => { keys[e.key] = false; });
-  const toLocal = e => { const r = gc.getBoundingClientRect(); return clamp((e.clientX - r.left) / r.width * GW, 0, GW); };
-  stage.addEventListener('pointerdown', e => { pointerX = toLocal(e); keys.fire = true; });
-  stage.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toLocal(e); });
+  const toLocal = e => { const r = gc.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width * GW, 0, GW), y: clamp((e.clientY - r.top) / r.height * GH, 0, GH) }; };
+  stage.addEventListener('pointerdown', e => { const p = toLocal(e), dx = p.x - GW / 2, dy = p.y - GH / 2; pointerX = p.x; keys.fire = true; taps.push(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)); });
+  stage.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toLocal(e).x; });
   addEventListener('pointerup', () => { pointerX = null; keys.fire = false; });
   addEventListener('pointercancel', () => { pointerX = null; keys.fire = false; });
   function fit() {
@@ -606,6 +659,9 @@ const Arena = (() => {
   const burst = (x, y, n, sp = 60) => { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = rnd(sp * .3, sp); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: rnd(.25, .6) }); } };
   const shake = n => { shakeT = Math.max(shakeT, n); if (!CONFIG.reducedMotion) { document.body.classList.remove('shake'); void document.body.offsetWidth; document.body.classList.add('shake'); } };
   const flash = () => { invert = .08; };
+  const note = (s, msg, sec = 1.1) => { s._note = { msg, t: sec }; };     // a banner that blinks over the arena for a moment
+  const takeTaps = () => { const t = taps; taps = []; return t; };
+  const setSpeed = (b, v) => { const m = Math.hypot(b.vx, b.vy) || 1; b.vx *= v / m; b.vy *= v / m; };
   const paddleInput = (x, w, speed, dt) => {
     if (pointerX !== null) return clamp(pointerX - w / 2, 0, GW - w);
     if (keys.ArrowLeft || keys.a || keys.A) x -= speed * dt;
@@ -614,130 +670,318 @@ const Arena = (() => {
   };
   const firing = () => !!(keys[' '] || keys.ArrowUp || keys.w || keys.fire || pointerX !== null);
 
-  async function countdown(def) {
-    for (let n = 3; n > 0; n--) { g.fillStyle = '#000'; g.fillRect(0, 0, GW, GH); text(def.name, 92, '#fff', 2); text(def.brief, 110, '#888'); text(String(n), 128, '#fff', 6); Audio_.sfx.count(false); await wait(520); }
+  async function countdown(def, lvl) {
+    const brief = typeof def.brief === 'function' ? def.brief(lvl) : def.brief;
+    for (let n = 3; n > 0; n--) {
+      g.fillStyle = '#000'; g.fillRect(0, 0, GW, GH);
+      text(def.name, 86, '#fff', 2); text(brief, 104, '#888'); if (lvl) text(`TIER ${lvl + 1}`, 114, '#fff');
+      text(String(n), 130, '#fff', 6); Audio_.sfx.count(false); await wait(520);
+    }
     g.fillStyle = '#fff'; g.fillRect(0, 0, GW, GH); Audio_.sfx.count(true); await wait(90);
   }
-  function run(def) {
+  function run(def, lvl = 0) {
     return new Promise(async res => {
-      stage.classList.add('on'); stage.classList.remove('white'); fit();
+      stage.classList.add('on'); stage.classList.remove('white', 'danger'); fit();
       title.textContent = def.name; help.textContent = Array.isArray(def.help) ? def.help[matchMedia('(pointer: coarse)').matches ? 0 : 1] : def.help || '';
-      particles = []; invert = 0; shakeT = 0; pointerX = null; keys.fire = false;
-      await countdown(def);
-      const st = def.init(); let last = performance.now(), over = null;
+      particles = []; invert = 0; shakeT = 0; pointerX = null; keys.fire = false; taps = [];
+      await countdown(def, lvl);
+      const st = def.init(lvl); st.lvl = lvl; current = st;
+      let last = performance.now(), over = null, heat = -1, heatAt = 0;
       resolveNow = r => { over = r; };
       const frame = now => {
         const dt = Math.min(.05, (now - last) / 1000); last = now;
         if (over === null) { const r = def.step(st, dt); if (r !== undefined) over = r; }
-        const plx = st.px ?? st.x; if (plx !== undefined) Eye.look({ x: (plx + (st.pw || 8) / 2) / GW * 2 - 1, y: .25 });
+        taps = [];
+        // the eye behind the arena watches; the music climbs with the game; danger is seen and heard
+        const plx = st.px ?? st.x;
+        if (st.look) Eye.look({ x: st.look.x / GW * 2 - 1, y: st.look.y / GH * 2 - 1 }); else if (plx !== undefined) Eye.look({ x: (plx + (st.pw || 8) / 2) / GW * 2 - 1, y: .25 });
+        if (over === null && st.heat !== undefined && now - heatAt > 400 && Math.abs(st.heat - heat) > .03) { heat = clamp(st.heat, 0, 1); heatAt = now; Audio_.setIntensity(.7 + heat * .3); }
+        const danger = over === null && !!st.danger; stage.classList.toggle('danger', danger); Audio_.setDanger(danger);
         if (over !== null && !st._endAt) { st._endAt = now; over ? Audio_.sfx.win() : Audio_.sfx.hurt(); if (!over) { shake(.5); flash(); buzz([60, 40, 120]); } else buzz(30); }
         particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 90 * dt; p.t -= dt; }); particles = particles.filter(p => p.t > 0);
         g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#000'; g.fillRect(0, 0, GW, GH);
         if (shakeT > 0) { shakeT -= dt; g.translate(Math.round(rnd(-2, 2)), Math.round(rnd(-2, 2))); }
         def.draw(st);
         particles.forEach(p => px(p.x, p.y, 1, 1));
+        if (st._note && over === null) { const n = st._note; n.t -= dt; if (n.t <= 0) st._note = null; else if (Math.floor(n.t * 12) % 3) { px(0, 184, GW, 20); text(n.msg, n.msg.length > 19 ? 192 : 189, '#000', n.msg.length > 19 ? 1 : 2); } }
         if (over !== null) {
-          const e = (now - st._endAt) / 1000;
-          if (e > .15) { px(0, GH / 2 - 16, GW, 32, over ? '#fff' : '#000'); if (!over) { px(0, GH / 2 - 16, GW, 1); px(0, GH / 2 + 15, GW, 1); } text(over ? 'BREACH SUCCESSFUL' : 'TERMINATED', GH / 2 - 5, over ? '#000' : '#fff', 2); }
-          if (e > 1.2) { stage.classList.remove('on'); resolveNow = null; Eye.look(null); return res(over); }
+          const e = (now - st._endAt) / 1000, why = over ? null : st.why;
+          if (e > .15) {
+            px(0, GH / 2 - 16, GW, 32, over ? '#fff' : '#000'); if (!over) { px(0, GH / 2 - 16, GW, 1); px(0, GH / 2 + 15, GW, 1); }
+            text(over ? 'BREACH SUCCESSFUL' : 'TERMINATED', GH / 2 - (why ? 11 : 5), over ? '#000' : '#fff', 2);
+            if (why) text(why, GH / 2 + 3, '#fff');
+          }
+          if (e > 1.2) { stage.classList.remove('on', 'danger'); Audio_.setDanger(false); resolveNow = null; current = null; Eye.look(null); return res(over); }
         }
-        if (invert > 0) { invert -= dt; g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'difference'; g.fillStyle = '#fff'; g.fillRect(0, 0, GW, GH); g.globalCompositeOperation = 'source-over'; }
+        if (invert > 0 || st.inverted) { if (invert > 0) invert -= dt; g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'difference'; g.fillStyle = '#fff'; g.fillRect(0, 0, GW, GH); g.globalCompositeOperation = 'source-over'; }
         requestAnimationFrame(frame);
       };
       requestAnimationFrame(frame);
     });
   }
 
-  // ---- 1. BREACH THE WALL: the wall is shaped like an eye; the pupil takes two hits
+  // ---- 1. BREACH THE WALL: the wall is shaped like an eye, and it is coming for you.
+  //      It descends a row at a time, sooner each time, and takes you if it reaches the
+  //      paddle; the ball quickens with every second and every return; the paddle shrinks
+  //      as the wall thins; at forty percent cleared a second ball is served; the pupil,
+  //      three hits deep, fires glare that stuns the paddle.
   const BRICKS = {
     name: 'BREACH THE WALL', brief: 'CLEAR EVERY BRICK. THREE BALLS.', help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
-    init: () => {
+    init: lvl => {
       const b = [], shape = ['....######....', '..##########..', '.############.', '#####.##.#####', '#####.##.#####', '.############.', '..##########..', '....######....'];
-      shape.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === '#') b.push({ x: 3 + c * 11, y: 22 + r * 7, w: 10, h: 6, hp: (r === 3 || r === 4) && (c === 6 || c === 7) ? 2 : 1 }); });
-      return { px: 64, pw: 32, bx: 80, by: 150, vx: 60, vy: -105, b, lives: 3, t: 0, serve: 1.2, hits: 0 };
+      shape.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === '#') {
+        const pupil = (r === 3 || r === 4) && (c === 6 || c === 7), iris = ((r === 2 || r === 5) && c >= 5 && c <= 8) || ((r === 3 || r === 4) && (c === 4 || c === 9));
+        b.push({ x: 3 + c * 11, y: 22 + r * 7, w: 10, h: 6, hp: pupil ? 3 : iris ? 2 : 1, pupil });
+      } });
+      const adv = Math.max(5, 9 - lvl * .75);
+      return { px: 64, pw: 32, balls: [], b, total: b.length, lives: 3, t: 0, serve: 1.2, boost: 1, adv, advAt: adv, bolts: [], glare: 7, stun: 0, split: false, heat: 0, danger: false };
     },
     step: (s, dt) => {
-      s.t += dt; s.px = paddleInput(s.px, s.pw, 230, dt);
-      if (s.serve > 0) { s.serve -= dt; s.bx = s.px + s.pw / 2; s.by = GH - 16; return; }
-      s.bx += s.vx * dt; s.by += s.vy * dt;
-      if (s.bx < 2) { s.bx = 2; s.vx = Math.abs(s.vx); Audio_.sfx.bounce(); } if (s.bx > GW - 2) { s.bx = GW - 2; s.vx = -Math.abs(s.vx); Audio_.sfx.bounce(); }
-      if (s.by < 2) { s.by = 2; s.vy = Math.abs(s.vy); Audio_.sfx.bounce(); }
-      if (s.vy > 0 && s.by > GH - 14 && s.by < GH - 8 && s.bx > s.px - 2 && s.bx < s.px + s.pw + 2) {
-        s.vy = -Math.abs(s.vy) * 1.025; s.vx += ((s.bx - s.px) / s.pw - .5) * 140; s.vx = clamp(s.vx, -170, 170); Audio_.sfx.blip();
+      s.t += dt; s.stun -= dt;
+      const cleared = 1 - s.b.filter(k => k.hp).length / s.total;
+      s.pw = Math.round(clamp(32 - 12 * cleared - s.lvl * 2, 16, 32));
+      s.px = s.stun > 0 ? clamp(s.px, 0, GW - s.pw) : paddleInput(s.px, s.pw, 240, dt);
+      // the wall advances
+      s.adv -= dt;
+      if (s.adv <= 0) { s.b.forEach(k => k.y += 7); s.advAt = Math.max(3.5, s.advAt - .7); s.adv = s.advAt; note(s, 'THE WALL ADVANCES', .9); Audio_.sfx.thud(); shake(.25); buzz(20); }
+      if (s.b.some(k => k.hp && k.y + k.h >= GH - 14)) { s.why = 'THE WALL TOOK YOU'; return false; }
+      // serve
+      if (s.serve > 0) { s.serve -= dt; if (s.serve <= 0) s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: Math.random() < .5 ? -60 : 60, vy: -105 }); }
+      // the pupil glares
+      const pupils = s.b.filter(k => k.pupil && k.hp);
+      if (pupils.length && s.balls.length && s.t > 6) {
+        s.glare -= dt;
+        if (s.glare <= 0) { s.bolts.push({ x: 79, y: pupils[0].y + 12, v: 75 + s.lvl * 10 }); s.glare = rnd(3.5, 6) - s.lvl * .4; Audio_.sfx.shoot(); }
       }
-      if (s.by > GH + 4) { s.lives--; Audio_.sfx.hurt(); flash(); shake(.3); if (!s.lives) return false; s.vx = 60; s.vy = -105; s.serve = 1; }
-      for (const k of s.b) if (k.hp && s.bx > k.x - 1 && s.bx < k.x + k.w + 1 && s.by > k.y - 1 && s.by < k.y + k.h + 1) {
-        k.hp--; s.hits++; burst(s.bx, s.by, k.hp ? 4 : 10); k.hp ? Audio_.sfx.hit() : Audio_.sfx.smash();
-        const fromSide = s.bx < k.x || s.bx > k.x + k.w; if (fromSide) s.vx *= -1; else s.vy *= -1; break;
+      s.bolts.forEach(o => o.y += o.v * dt);
+      for (const o of s.bolts) if (o.y > GH - 14 && o.y < GH - 6 && o.x + 2 > s.px && o.x < s.px + s.pw) { o.y = GH + 9; s.stun = .9; flash(); shake(.3); Audio_.sfx.hurt(); burst(o.x, GH - 10, 8); }
+      s.bolts = s.bolts.filter(o => o.y < GH + 8);
+      // the balls, in sub-steps so a fast ball cannot pass through a brick or the paddle
+      const speed = 118 * (1 + Math.min(.75, s.t / 50)) * s.boost * (1 + s.lvl * .08);
+      for (const ball of s.balls) {
+        setSpeed(ball, speed);
+        const n = Math.ceil(speed * dt / 3), h = dt / n;
+        for (let i = 0; i < n && !ball.lost; i++) {
+          ball.x += ball.vx * h; ball.y += ball.vy * h;
+          if (ball.x < 2) { ball.x = 2; ball.vx = Math.abs(ball.vx); Audio_.sfx.bounce(); } if (ball.x > GW - 2) { ball.x = GW - 2; ball.vx = -Math.abs(ball.vx); Audio_.sfx.bounce(); }
+          if (ball.y < 2) { ball.y = 2; ball.vy = Math.abs(ball.vy); Audio_.sfx.bounce(); }
+          if (ball.vy > 0 && ball.y > GH - 14 && ball.y < GH - 8 && ball.x > s.px - 2 && ball.x < s.px + s.pw + 2) {
+            ball.vy = -Math.abs(ball.vy); ball.vx += ((ball.x - s.px) / s.pw - .5) * 160;
+            const m = Math.hypot(ball.vx, ball.vy); if (Math.abs(ball.vy) < m * .35) { ball.vy = -m * .35; ball.vx = Math.sign(ball.vx || 1) * m * Math.sqrt(1 - .35 * .35); }
+            s.boost = Math.min(1.35, s.boost * 1.02); Audio_.sfx.blip();
+          }
+          if (ball.y > GH + 4) { ball.lost = true; break; }
+          for (const k of s.b) if (k.hp && ball.x > k.x - 1 && ball.x < k.x + k.w + 1 && ball.y > k.y - 1 && ball.y < k.y + k.h + 1) {
+            k.hp--; burst(ball.x, ball.y, k.hp ? 4 : 10); k.hp ? Audio_.sfx.hit() : Audio_.sfx.smash(); if (!k.hp && k.pupil) { shake(.3); flash(); }
+            const fromSide = ball.x < k.x || ball.x > k.x + k.w; if (fromSide) ball.vx *= -1; else ball.vy *= -1; break;
+          }
+        }
       }
+      if (s.balls.some(b => b.lost)) {
+        s.balls = s.balls.filter(b => !b.lost);
+        if (!s.balls.length) { s.lives--; Audio_.sfx.hurt(); flash(); shake(.3); if (!s.lives) { s.why = 'OUT OF BALLS'; return false; } s.serve = 1; s.boost = 1; }
+      }
+      // the second ball
+      if (!s.split && cleared >= .4 && s.balls.length) { s.split = true; const b0 = s.balls[0]; s.balls.push({ x: s.px + s.pw / 2, y: GH - 16, vx: -Math.sign(b0.vx || 1) * 70, vy: -100 }); note(s, 'SECOND BALL'); Audio_.sfx.smash(); }
+      const low = Math.max(0, ...s.b.filter(k => k.hp).map(k => k.y + k.h));
+      s.heat = cleared * .7 + (s.lives === 1 ? .3 : 0); s.danger = s.lives === 1 || low >= GH - 14 - 21;
       if (s.b.every(k => !k.hp)) return true;
     },
     draw: s => {
-      for (const k of s.b) if (k.hp) { px(k.x, k.y, k.w, k.h); if (k.hp === 2) px(k.x + 2, k.y + 2, k.w - 4, k.h - 4, '#000'); }
-      px(s.px, GH - 10, s.pw, 3); px(s.px + 2, GH - 7, s.pw - 4, 1);
-      px(s.bx - 1, s.by - 1, 3, 3);
+      for (const k of s.b) if (k.hp) { px(k.x, k.y, k.w, k.h); if (k.hp >= 2) px(k.x + 2, k.y + 2, k.w - 4, k.h - 4, '#000'); if (k.hp === 3) px(k.x + 4, k.y + 2, 2, 2); }
+      if (s.stun > 0 && Math.floor(s.t * 20) % 2) { for (let x = s.px; x < s.px + s.pw; x += 4) px(x, GH - 10, 2, 3); }
+      else { px(s.px, GH - 10, s.pw, 3); px(s.px + 2, GH - 7, s.pw - 4, 1); }
+      if (s.serve > 0) px(s.px + s.pw / 2 - 1, GH - 17, 3, 3);
+      for (const b of s.balls) px(b.x - 1, b.y - 1, 3, 3);
+      for (const o of s.bolts) { px(o.x, o.y, 2, 5); px(o.x, o.y + 7, 2, 2); }
       for (let i = 0; i < s.lives; i++) px(4 + i * 6, 4, 4, 4);
       text(s.serve > 0 ? 'SERVE' : `${s.b.filter(k => k.hp).length} LEFT`, 5, '#888');
+      px(118, 6, Math.round(38 * (s.adv / s.advAt)), 2, '#888');                 // until the wall advances
     }
   };
 
-  // ---- 2. PURGE THE SWARM: waves of watchers; 24 kills to pass
+  // ---- 2. PURGE THE SWARM: waves of watchers that sweep in lines, dive at you and aim
+  //      their shots; half way, twin cannon; at the quota, the Warden: a great eye that
+  //      strafes faster as it is hurt, fires spreads at you and calls escorts.
   const FOE = [['.#.....#.', '..#...#..', '.#######.', '##.###.##', '#########', '#.#...#.#', '#.#...#.#', '...#.#...'], ['.#.....#.', '#.#...#.#', '.#######.', '##.###.##', '#########', '..#...#..', '.#.....#.', '#.......#']];
   const SHIP = ['...##...', '...##...', '..####..', '.######.', '##.##.##', '#..##..#'];
+  const WARDEN = Array.from({ length: 13 }, (_, j) => Array.from({ length: 25 }, (_, i) => { const dx = (i - 12) / 12.5, dy = (j - 6) / 6.5, r = dx * dx + dy * dy; return r <= 1 && !(r > .46 && r < .64) ? '#' : '.'; }).join(''));
   const SHMUP = {
-    name: 'PURGE THE SWARM', brief: 'DESTROY 24 WATCHERS. THREE LIVES.', help: ['DRAG TO MOVE · HOLD TO FIRE', '← → MOVE · SPACE FIRE'],
-    init: () => ({ x: 76, shots: [], foes: [], eshots: [], kills: 0, need: 24, t: 0, cd: 0, spawn: .6, lives: 3, inv: 0 }),
+    name: 'PURGE THE SWARM', brief: lvl => `DESTROY ${28 + lvl * 6} WATCHERS. THEN THE WARDEN.`, help: ['DRAG TO MOVE · HOLD TO FIRE', '← → MOVE · SPACE FIRE'],
+    init: lvl => ({ x: 76, shots: [], foes: [], eshots: [], kills: 0, need: 28 + lvl * 6, t: 0, cd: 0, spawn: .5, lives: 3, inv: 0, combo: 0, comboT: 0, twin: false, boss: null, heat: 0, danger: false }),
     step: (s, dt) => {
-      s.t += dt; s.cd -= dt; s.inv -= dt; s.spawn -= dt; s.x = paddleInput(s.x, 8, 190, dt);
-      if (firing() && s.cd <= 0) { s.shots.push({ x: s.x + 3.5, y: GH - 22 }); s.cd = .2; Audio_.sfx.shoot(); }
-      if (s.spawn <= 0) { const n = 1 + Math.floor(s.kills / 8); for (let i = 0; i < n; i++) s.foes.push({ x: rnd(2, GW - 11), y: -10 - i * 14, vx: rnd(-1, 1) * (30 + s.kills * 2), hp: 1, f: Math.random() * 10 }); s.spawn = Math.max(.45, 1.1 - s.kills * .03); }
-      s.shots.forEach(p => p.y -= 210 * dt); s.shots = s.shots.filter(p => p.y > -4);
-      s.foes.forEach(f => { f.y += (26 + s.kills * .8) * dt; f.x += f.vx * dt; if (f.x < 0 || f.x > GW - 9) f.vx *= -1; if (Math.random() < .005 + s.kills * .0003) s.eshots.push({ x: f.x + 4, y: f.y + 8 }); });
-      s.eshots.forEach(p => p.y += 95 * dt); s.eshots = s.eshots.filter(p => p.y < GH);
-      for (const f of s.foes) for (const p of s.shots) if (!f.d && p.x > f.x - 1 && p.x < f.x + 10 && p.y > f.y && p.y < f.y + 8) { f.d = 1; p.y = -99; s.kills++; burst(f.x + 4, f.y + 4, 8); Audio_.sfx.kill(); }
-      s.foes = s.foes.filter(f => !f.d && f.y < GH);
-      const hit = s.eshots.some(p => p.x > s.x && p.x < s.x + 8 && p.y > GH - 20 && p.y < GH - 10) || s.foes.some(f => f.y + 8 > GH - 20 && f.x < s.x + 8 && f.x + 9 > s.x);
-      if (hit && s.inv <= 0) { s.lives--; s.inv = 1.3; flash(); shake(.3); Audio_.sfx.hurt(); burst(s.x + 4, GH - 15, 12); if (!s.lives) return false; }
-      if (s.kills >= s.need) return true;
+      s.t += dt; s.cd -= dt; s.inv -= dt; s.spawn -= dt; s.comboT -= dt; s.x = paddleInput(s.x, 8, 200, dt);
+      if (firing() && s.cd <= 0) { if (s.twin) s.shots.push({ x: s.x + 1, y: GH - 22 }, { x: s.x + 6, y: GH - 22 }); else s.shots.push({ x: s.x + 3.5, y: GH - 22 }); s.cd = s.twin ? .17 : .19; Audio_.sfx.shoot(); }
+      const k = s.kills, prog = Math.min(1, k / s.need);
+      let B = s.boss;
+      if (!B && s.spawn <= 0) {
+        const n = 1 + Math.floor(k / 7) + (s.lvl ? 1 : 0), line = Math.random() < .3 + prog * .3, dir = Math.random() < .5 ? -1 : 1;
+        for (let i = 0; i < n; i++) s.foes.push(line && i < 6 ? { x: dir > 0 ? -10 - i * 14 : GW + 1 + i * 14, y: rnd(-6, 10), vx: dir * (45 + k * 2), f: i, dive: 0, line: 1 } : { x: rnd(2, GW - 11), y: -10 - i * 14, vx: rnd(-1, 1) * (34 + k * 2.5), f: Math.random() * 10, dive: 0 });
+        s.spawn = Math.max(.36, 1 - k * .028 - s.lvl * .05);
+      }
+      s.shots.forEach(p => p.y -= 250 * dt); s.shots = s.shots.filter(p => p.y > -4);
+      for (const f of s.foes) {
+        if (!f.dive && f.y > 36 && Math.random() < .0012 + prog * .004) { f.dive = 1; Audio_.sfx.blip(); }
+        if (f.dive) { f.y += (105 + k * 1.5) * dt; f.x += clamp((s.x - f.x) * 3, -75, 75) * dt; }
+        else {
+          f.y += (28 + k * 1.1) * dt; f.x += f.vx * dt;
+          if (f.line && f.x > 0 && f.x < GW - 9) f.line = 0;
+          if (!f.line && (f.x < 0 || f.x > GW - 9)) { f.x = clamp(f.x, 0, GW - 9); f.vx *= -1; }
+          if (Math.random() < .004 + k * .0004) s.eshots.push({ x: f.x + 4, y: f.y + 8, vx: clamp((s.x - f.x) / 1.6, -60, 60), vy: 100 + k * 1.5 });
+        }
+      }
+      s.eshots.forEach(p => { p.y += p.vy * dt; p.x += p.vx * dt; }); s.eshots = s.eshots.filter(p => p.y < GH && p.x > -3 && p.x < GW + 3);
+      let kills = 0;
+      for (const f of s.foes) for (const p of s.shots) if (!f.d && p.y > -1 && p.x > f.x - 1 && p.x < f.x + 10 && p.y > f.y && p.y < f.y + 8) { f.d = 1; p.y = -99; kills++; burst(f.x + 4, f.y + 4, 8); Audio_.sfx.kill(); }
+      if (kills) {
+        s.kills += kills; s.combo = s.comboT > 0 ? s.combo + kills : kills; s.comboT = .55; if (s.combo >= 3) shake(.12);
+        if (!s.twin && s.kills >= s.need / 2) { s.twin = true; note(s, 'TWIN CANNON'); Audio_.sfx.smash(); }
+      }
+      s.foes = s.foes.filter(f => !f.d && f.y < GH && f.x > -100 && f.x < GW + 100);
+      if (!B && s.kills >= s.need) { const hp = 18 + s.lvl * 4; B = s.boss = { x: 68, y: -16, hp, max: hp, t: 0, cd: 1.6, hurt: 0 }; s.foes = []; s.eshots = []; note(s, 'THE WARDEN COMES', 1.6); Audio_.sfx.thud(); shake(.4); buzz([40, 40, 80]); }
+      if (B) {
+        B.t += dt; B.cd -= dt; B.hurt -= dt;
+        const rage = 1 - B.hp / B.max;
+        if (B.y < 18) B.y += 24 * dt; else { B.x = 68 + Math.sin(B.t * (1.2 + rage * 1.8)) * 62 + Math.sin(B.t * 3.3) * 6; B.y = 18 + Math.sin(B.t * .8) * 7; }
+        if (B.y >= 8 && B.cd <= 0) {
+          const cx = B.x + 12, cy = B.y + 12, aim = clamp((s.x + 4 - cx) / 1.4, -60, 60);
+          for (const o of [-48, 0, 48]) s.eshots.push({ x: cx, y: cy, vx: aim + o, vy: 95 + s.lvl * 10 + rage * 30 });
+          if (Math.random() < .45) s.foes.push({ x: cx - 4, y: cy, vx: rnd(-1, 1) * 50, f: 0, dive: 0 });
+          B.cd = Math.max(.5, 1.4 - rage * .8); Audio_.sfx.shoot();
+        }
+        for (const p of s.shots) if (p.y > -1 && p.y > B.y && p.y < B.y + 13 && p.x > B.x && p.x < B.x + 25) { p.y = -99; B.hp--; B.hurt = .07; burst(p.x, B.y + 13, 3); Audio_.sfx.hit(); }
+        if (B.hp <= 0) { burst(B.x + 12, B.y + 6, 50, 110); shake(.6); flash(); return true; }
+      }
+      const hit = s.eshots.some(p => p.x > s.x - 1 && p.x < s.x + 9 && p.y > GH - 20 && p.y < GH - 12) || s.foes.some(f => f.y + 8 > GH - 20 && f.y < GH - 12 && f.x < s.x + 8 && f.x + 9 > s.x);
+      if (hit && s.inv <= 0) { s.lives--; s.inv = 1.4; flash(); shake(.3); Audio_.sfx.hurt(); burst(s.x + 4, GH - 15, 12); s.eshots = []; if (!s.lives) { s.why = B ? 'THE WARDEN STANDS' : 'TAKEN BY THE SWARM'; return false; } }
+      s.heat = B ? .7 + .3 * (1 - B.hp / B.max) : prog * .65; s.danger = s.lives === 1 || (!!B && B.hp <= 5);
     },
     draw: s => {
       if (s.inv <= 0 || Math.floor(s.t * 14) % 2) sprite(SHIP, s.x, GH - 20);
       s.shots.forEach(p => px(p.x, p.y, 1, 4)); s.eshots.forEach(p => px(p.x, p.y, 2, 3));
-      s.foes.forEach(f => sprite(FOE[Math.floor(s.t * 4 + f.f) % 2], f.x, f.y));
-      for (let i = 0; i < s.lives; i++) px(4 + i * 6, 4, 4, 4); text(`${s.kills}/${s.need}`, 5, '#888');
+      s.foes.forEach(f => sprite(FOE[Math.floor(s.t * (f.dive ? 12 : 4) + f.f) % 2], f.x, f.y));
+      const B = s.boss;
+      if (B) {
+        const inv = B.hurt > 0; if (inv) px(B.x - 1, B.y - 1, 27, 15); sprite(WARDEN, B.x, B.y, inv ? '#000' : '#fff');
+        px(B.x + 11 + clamp((s.x - B.x - 8) / 20, -3, 3), B.y + 5, 3, 3, inv ? '#fff' : '#000');     // it looks at you
+        px(28, 3, 104, 1, '#444'); px(28, 2, Math.round(104 * B.hp / B.max), 3);
+      }
+      for (let i = 0; i < s.lives; i++) px(4 + i * 6, 4, 4, 4);
+      if (!B) text(`${s.kills}/${s.need}`, 5, '#888');
+      if (s.comboT > 0 && s.combo >= 2) text(`X${s.combo}`, 14, '#fff', 2);
     }
   };
 
-  // ---- 3. OUTRUN THE STATIC: survive 20 seconds of falling static and sweeping bars
+  // ---- 3. OUTRUN THE STATIC: falling static and barred gates, then seekers that hunt
+  //      your position, then lashes that whip in from the edges; the last six seconds run
+  //      negative and a quarter faster.
   const DODGE = {
-    name: 'OUTRUN THE STATIC', brief: 'SURVIVE 20 SECONDS. ONE LIFE.', help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
-    init: () => ({ x: 76, rocks: [], bars: [], t: 0, goal: 20, spawn: 0, bar: 4, near: 0 }),
+    name: 'OUTRUN THE STATIC', brief: lvl => `SURVIVE ${24 + lvl * 3} SECONDS. ONE LIFE.`, help: ['DRAG TO MOVE', '← → OR A D TO MOVE'],
+    init: lvl => ({ x: 76, rocks: [], bars: [], seekers: [], lashes: [], t: 0, goal: 24 + lvl * 3, spawn: 0, bar: 3.5, seek: 1.5, lash: 1.5, near: 0, phase: 0, heat: 0, danger: false, inverted: false }),
     step: (s, dt) => {
-      s.t += dt; s.spawn -= dt; s.bar -= dt; s.x = paddleInput(s.x, 8, 210, dt);
-      if (s.spawn <= 0) { s.rocks.push({ x: rnd(0, GW - 6), y: -6, v: 60 + s.t * 5, w: rnd(4, 9) | 0 }); s.spawn = Math.max(.1, .45 - s.t * .017); }
-      if (s.bar <= 0) { const gap = rnd(10, GW - 40); s.bars.push({ y: -4, gap, gw: 30 + Math.max(0, 10 - s.t * .5), v: 40 + s.t * 2 }); s.bar = rnd(3, 5) - s.t * .05; }
+      const od = s.t > s.goal - 6, m = (od ? 1.25 : 1) * (1 + s.lvl * .08);
+      s.t += dt; s.spawn -= dt * m; s.bar -= dt * m; s.seek -= dt; s.lash -= dt; s.x = paddleInput(s.x, 8, 215, dt);
+      if (s.phase < 1 && s.t > 8) { s.phase = 1; note(s, 'SEEKERS'); Audio_.sfx.thud(); }
+      if (s.phase < 2 && s.t > 14) { s.phase = 2; note(s, 'LASHES'); Audio_.sfx.thud(); }
+      if (s.phase < 3 && od) { s.phase = 3; s.inverted = true; note(s, 'OVERDRIVE'); Audio_.sfx.glitch(); shake(.4); buzz([30, 30, 30]); }
+      if (s.spawn <= 0) { s.rocks.push({ x: rnd(0, GW - 6), y: -6, v: (62 + s.t * 5.5) * m, w: rnd(4, 10) | 0 }); s.spawn = Math.max(.11, .42 - s.t * .015); }
+      if (s.bar <= 0) { const gw = Math.max(22, 30 + Math.max(0, 10 - s.t * .5) - s.lvl * 2), gap = rnd(6, GW - gw - 6); s.bars.push({ y: -4, gap, gw, v: (42 + s.t * 2.2) * m }); s.bar = Math.max(1.6, rnd(2.6, 4.2) - s.t * .05); }
+      if (s.phase >= 1 && s.seek <= 0) { s.seekers.push({ x: rnd(4, GW - 12), y: -8, vy: (48 + s.t * 2) * m }); s.seek = Math.max(1.3, 3 - s.t * .06); }
+      if (s.phase >= 2 && s.lash <= 0) { s.lashes.push({ side: Math.random() < .5 ? 1 : -1, t: 0, warn: Math.max(.5, .9 - s.t * .012), len: 0 }); s.lash = Math.max(2, 4.6 - s.t * .08); }
       s.rocks.forEach(r => r.y += r.v * dt); s.rocks = s.rocks.filter(r => r.y < GH);
       s.bars.forEach(b => b.y += b.v * dt); s.bars = s.bars.filter(b => b.y < GH);
+      s.seekers.forEach(e => { e.x += clamp((s.x - e.x) * 2.5, -(55 + s.t * 1.5), 55 + s.t * 1.5) * dt; e.y += e.vy * dt; }); s.seekers = s.seekers.filter(e => e.y < GH);
+      for (const L of s.lashes) { L.t += dt; const e = L.t - L.warn, R = GW * .68; L.len = e < 0 ? 0 : e < .3 ? e / .3 * R : e < .65 ? R : Math.max(0, 1 - (e - .65) / .35) * R; }
+      s.lashes = s.lashes.filter(L => L.t < L.warn + 1.05);
       const py = GH - 16;
-      for (const r of s.rocks) { const hitX = r.x < s.x + 8 && r.x + r.w > s.x, hitY = r.y + 6 > py && r.y < py + 8; if (hitX && hitY) return false; if (!r.n && hitY && r.x < s.x + 14 && r.x + r.w > s.x - 6) { r.n = 1; Audio_.sfx.blip(); s.near++; } }
-      for (const b of s.bars) if (b.y + 3 > py && b.y < py + 8 && (s.x < b.gap || s.x + 8 > b.gap + b.gw)) return false;
+      for (const r of s.rocks) { const hitX = r.x < s.x + 8 && r.x + r.w > s.x, hitY = r.y + 6 > py && r.y < py + 8; if (hitX && hitY) { s.why = 'STRUCK BY STATIC'; return false; } if (!r.n && hitY && r.x < s.x + 14 && r.x + r.w > s.x - 6) { r.n = 1; Audio_.sfx.blip(); s.near++; } }
+      for (const b of s.bars) if (b.y + 3 > py && b.y < py + 8 && (s.x < b.gap || s.x + 8 > b.gap + b.gw)) { s.why = 'THE BAR TOOK YOU'; return false; }
+      for (const e of s.seekers) if (e.x < s.x + 8 && e.x + 8 > s.x && e.y + 8 > py && e.y < py + 8) { s.why = 'A SEEKER FOUND YOU'; return false; }
+      for (const L of s.lashes) if (L.len > 0 && (L.side > 0 ? s.x < L.len : s.x + 8 > GW - L.len)) { s.why = 'LASHED'; return false; }
+      s.heat = s.t / s.goal; s.danger = od;
       if (s.t >= s.goal) return true;
     },
     draw: s => {
       px(s.x, GH - 16, 8, 8); px(s.x + 2, GH - 14, 4, 4, '#000'); px(s.x + 3, GH - 13, 2, 2);
       s.rocks.forEach(r => { px(r.x, r.y, r.w, 6); if (r.w > 5) px(r.x + 1, r.y + 1, r.w - 2, 4, '#000'); });
       s.bars.forEach(b => { px(0, b.y, b.gap, 3); px(b.gap + b.gw, b.y, GW - b.gap - b.gw, 3); });
+      s.seekers.forEach(e => { px(e.x, e.y, 8, 8); px(e.x + 1, e.y + 1, 6, 6, '#000'); if (Math.floor(s.t * 8) % 2) px(e.x + 3, e.y + 3, 2, 2); });
+      for (const L of s.lashes) { if (L.len > 0) px(L.side > 0 ? 0 : GW - L.len, GH - 14, L.len, 4); else if (Math.floor(L.t * 14) % 2) px(L.side > 0 ? 0 : GW - 3, GH - 26, 3, 26); }
       text(`${Math.ceil(s.goal - s.t)}`, 5, '#888'); px(0, GH - 1, GW * (s.t / s.goal), 1);
     }
   };
 
-  const GAMES = [BRICKS, SHMUP, DODGE];
+  // ---- 4. RECITE THE SIGIL: nothing to dodge and nowhere to run. The eye flashes a
+  //      sequence of four runes, one longer and faster every round; recite it back, in
+  //      order, before the timer drains. One wrong rune ends it.
+  const RUNES = [
+    ['...#...', '..###..', '.#.#.#.', '#..#..#', '...#...', '...#...', '...#...'],   // up: the trident
+    ['#.....#', '.#...#.', '..#.#..', '...#...', '..#.#..', '.#...#.', '#.....#'],   // right: the cross
+    ['..###..', '.#...#.', '#..#..#', '#.###.#', '#..#..#', '.#...#.', '..###..'],   // down: the eye
+    ['#######', '#.....#', '#.###.#', '#.#.#.#', '#.###.#', '#.....#', '#######'],   // left: the cell
+  ];
+  const RUNE_AT = [{ x: 80, y: 86 }, { x: 116, y: 122 }, { x: 80, y: 158 }, { x: 44, y: 122 }];   // centres: up, right, down, left
+  const CENTRE = { x: 80, y: 122 };
+  const SIGIL = {
+    name: 'RECITE THE SIGIL', brief: lvl => `REPEAT THE SEQUENCE. ${6 + Math.min(3, lvl)} ROUNDS.`, help: ['WATCH · THEN TAP THE RUNES IN ORDER', 'WATCH · THEN ↑ → ↓ ← OR W D S A IN ORDER'],
+    init: lvl => ({ seq: [], round: 0, rounds: 6 + Math.min(3, lvl), phase: 'wait', t: .8, age: 0, i: 0, lit: -1, on: 0, show: .4, gap: .14, limit: 2.2, timer: 0, heat: 0, danger: false, look: CENTRE }),
+    step: (s, dt) => {
+      s.t -= dt; s.on -= dt; s.age += dt;
+      if (s.on <= 0 && s.phase !== 'show') s.lit = -1;
+      s.look = s.lit >= 0 ? RUNE_AT[s.lit] : CENTRE;
+      const taps = takeTaps();
+      if (s.phase === 'wait') {                                       // between rounds: one more rune, then the eye recites
+        if (s.t <= 0) {
+          s.seq.push(Math.floor(Math.random() * 4)); s.round++; s.i = 0; s.phase = 'show'; s.t = .35;
+          s.show = Math.max(.17, .42 - s.round * .035 - s.lvl * .02); s.gap = Math.max(.06, .14 - s.round * .01); s.limit = Math.max(1, 2.2 - s.round * .16 - s.lvl * .1);
+          note(s, `ROUND ${s.round}`, .8);
+        }
+      } else if (s.phase === 'show') {
+        if (s.t <= 0) {
+          if (s.lit >= 0) { s.lit = -1; s.t = s.gap; s.i++; }
+          else if (s.i < s.seq.length) { s.lit = s.seq[s.i]; s.t = s.show; Audio_.sfx.rune(s.lit); }
+          else { s.phase = 'input'; s.i = 0; s.timer = s.limit; }
+        }
+      } else if (s.phase === 'input') {                               // you recite
+        s.timer -= dt;
+        if (s.timer <= 0) { s.why = 'TOO SLOW'; return false; }
+        for (const d of taps) {
+          s.lit = d; s.on = .16;
+          if (d !== s.seq[s.i]) { s.on = 9; s.why = 'WRONG RUNE'; return false; }
+          s.i++; s.timer = s.limit; Audio_.sfx.rune(d); burst(RUNE_AT[d].x, RUNE_AT[d].y, 6, 40);
+          if (s.i >= s.seq.length) {
+            if (s.round >= s.rounds) { flash(); return true; }
+            s.phase = 'wait'; s.t = .9; flash(); shake(.15); Audio_.sfx.smash(); buzz(15); break;
+          }
+        }
+      }
+      s.heat = (s.round - 1) / s.rounds + (s.phase === 'input' ? .1 : 0);
+      s.danger = s.round >= s.rounds - 1 || (s.phase === 'input' && s.timer < s.limit * .35);
+    },
+    draw: s => {
+      const L = s.lit >= 0 ? RUNE_AT[s.lit] : null;
+      sprite(['....#####....', '..##.....##..', '.#.........#.', '#...........#', '.#.........#.', '..##.....##..', '....#####....'], CENTRE.x - 6, CENTRE.y - 3);
+      px(CENTRE.x - 1 + (L ? Math.sign(L.x - CENTRE.x) * 3 : 0), CENTRE.y - 1 + (L ? Math.sign(L.y - CENTRE.y) : 0), 3, 3);     // the pupil follows the lit rune
+      RUNES.forEach((r, i) => {
+        const c = RUNE_AT[i], lit = s.lit === i;
+        if (lit) px(c.x - 8, c.y - 8, 17, 17); else { px(c.x - 8, c.y - 8, 17, 1); px(c.x - 8, c.y + 8, 17, 1); px(c.x - 8, c.y - 8, 1, 17); px(c.x + 8, c.y - 8, 1, 17); }
+        sprite(r, c.x - 3, c.y - 3, lit ? '#000' : '#fff');
+      });
+      for (let i = 0; i < s.seq.length; i++) px(CENTRE.x - s.seq.length * 2 + i * 4, 176, 3, 3, i < s.i ? '#fff' : '#444');
+      if (s.phase === 'input') { px(0, GH - 2, Math.round(GW * s.timer / s.limit), 2); text('RECITE', 14, Math.floor(s.age * 6) % 2 ? '#fff' : '#888'); }
+      else if (s.phase === 'show') text('WATCH', 14, '#888');
+      text(`ROUND ${Math.max(1, s.round)}/${s.rounds}`, 5, '#888');
+    }
+  };
+
+  const GAMES = [BRICKS, SHMUP, DODGE, SIGIL];
   let lastGame = null;
   return {
     GAMES, run,
     random() { let gm; do gm = pick(GAMES); while (gm === lastGame && GAMES.length > 1); lastGame = gm; return gm; },
     byName: n => GAMES.find(x => x.name.toLowerCase().includes(n.toLowerCase())),
     end: r => resolveNow && resolveNow(r),        // debug / test hook: finish the running game
+    current: () => current,                       // debug / test hook: the running game's state
   };
 })();
 
@@ -872,13 +1116,13 @@ const Gate = (() => {
     await wait(450);
     Eye.look(null); Eye.setMood('angry'); Audio_.setIntensity(.55); Audio_.sfx.thud(); buzz(30);
     await Voice.say(pick(TAUNTS));
-    glitch(); Audio_.setIntensity(1);
+    glitch(); Audio_.setIntensity(.7);
     await wait(350);
     Eye.setMood('judge'); ui.classList.add('hidden'); Audio_.startBeat();
-    const won = await Arena.run(Arena.random());
+    const won = await Arena.run(Arena.random(), Math.min(wins, 4));      // every win so far makes the next trial harder
     Audio_.stopBeat(); ui.classList.remove('hidden'); lastActivity = performance.now();
     if (!won) {
-      fails++; Eye.setMood('contempt'); Audio_.setIntensity(.4); Audio_.sfx.lose();
+      fails++; Eye.setMood('contempt'); Audio_.setIntensity(.4); Audio_.sfx.lose(); glitch();
       await Voice.say(fails > 1 ? pick(LOSE_AGAIN) : pick(LOSE));
       Eye.setMood('idle'); Audio_.setIntensity(.1); setBusy(false); return;
     }
@@ -956,7 +1200,8 @@ $('wake').addEventListener('click', async function () {
 }, { once: false });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) Audio_.resume(); });
 
-// Console / test handle: GK.gate('question'), GK.arena.end(true) to force a win, GK.eye.setMood('angry'), …
+// Console / test handle: GK.gate('question'), GK.arena.end(true) to force a win, GK.arena.run(GK.arena.byName('sigil'), 2),
+// GK.arena.current() for the running game's state, GK.eye.setMood('angry'), …
 window.GK = { gate: Gate.gate, say: Voice.say, eye: Eye, arena: Arena, audio: Audio_, stats: Gate.stats, askClaude };
 </script>
 </body>

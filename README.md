@@ -1,6 +1,6 @@
 # Gatekeeper Eye
 
-A full-screen, dark, red eye guards a Claude session. Ask it something by typing or speaking; it taunts you in a low mechanical voice, drops you into a one-bit pixel game under a dark synth drone, and only answers if you win. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
+A full-screen, dark, red eye guards a Claude session. Ask it something by typing or speaking; it taunts you in a deep, distorted voice, drops you into a one-bit pixel game under a dark synth drone and a driving beat, and only answers if you win. Every win makes the next trial harder. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
 
 The page is one HTML file with no build step, no dependency, no audio file and no image: the eye, the voice layer, the music and the games are all generated in the browser. The bridge that connects it to Claude is a small Node server.
 
@@ -74,15 +74,19 @@ For remote or mobile use, put the bridge behind a tunnel (ngrok, Cloudflare Tunn
 | Esc, or tap the readout | dismiss an answer |
 | Drag, or ← → / A D | move in the games |
 | Hold, or Space | fire (Purge the Swarm) |
+| Tap a rune, or ↑ → ↓ ← / W D S A | recite (Recite the Sigil) |
 
 ## What happens
 
 1. The eye wakes: lids open, the iris ignites, a drone swells.
 2. Your question makes it angry. It taunts you, the screen tears, the drone intensifies.
-3. One of three games starts at random (never the same one twice in a row):
-   - **Breach the Wall** — brick breaker. The wall is shaped like an eye; the pupil takes two hits. Three balls.
-   - **Purge the Swarm** — shoot 'em up. Twenty-four kills, three lives, waves that thicken as you score.
-   - **Outrun the Static** — dodge falling static and sweeping bars for twenty seconds. One life.
+3. One of four games starts at random (never the same one twice in a row), and each one tightens as it goes. Every trial you have already won raises the tier of the next: more to kill, longer to survive, a faster wall, more rounds.
+   - **Breach the Wall** — brick breaker. The wall is shaped like an eye and descends a row at a time, sooner each time; if it reaches the paddle it takes you. The ball quickens with every second and every return, the paddle shrinks as the wall thins, a second ball is served at forty percent cleared, and the pupil, three hits deep, fires glare that stuns the paddle. Three balls.
+   - **Purge the Swarm** — shoot 'em up. Watchers sweep in lines, dive at you and aim their shots. Twin cannon at half the quota; at the quota, the Warden: a great eye that strafes faster as it is hurt, fires spreads at you and calls escorts. Three lives.
+   - **Outrun the Static** — dodge falling static and barred gates, then seekers that hunt your position, then lashes that whip in from the edges after a blink of warning. The last six seconds run negative and a quarter faster. One life.
+   - **Recite the Sigil** — nothing to dodge and nowhere to run. The eye flashes a sequence of four runes, one longer and faster every round; recite it back, in order, before the timer drains. Six rounds. One wrong rune ends it.
+
+   The music climbs with the game. On a last life (or the last seconds, or the last rounds) the frame pulses red and an alarm joins the beat.
 4. Lose, and it mocks you (differently if you keep losing). Win, and it consults the session: the eye rolls up, the readout opens, and you watch what it reads (`READING src/auth/token.ts`, `SEARCHING "refresh"`) before the answer types itself out and is read aloud.
 
 Leave it alone long enough and it mutters at you.
@@ -91,12 +95,13 @@ Leave it alone long enough and it mutters at you.
 
 ```sh
 npm test                 # repo tools, both oracles (fake CLI / mock Messages API + MCP), the HTTP and SSE server
-npx playwright install chromium && npm run test:e2e   # headless Chromium: standalone page and bridge-served page
+npx playwright install chromium && npm run test:e2e   # headless Chromium: standalone page, every game under an autopilot, bridge-served page
+CHROMIUM=/path/to/chrome npm run test:e2e               # with a Chromium you already have
 ```
 
 ## Structure
 
-- `index.html` — the page. Sections: CONFIG · AUDIO (buses, convolver reverb, the drone with its heartbeat and metallic hits, a combat pulse, one-bit sfx) · VOICE (`speechSynthesis` pitched down, a synthesized mechanical layer pulsed on word boundaries, synced subtitles, `SpeechRecognition`) · EYE (almond lids, heartbeat-synced veins, a pre-rendered fibrous iris in two counter-rotating layers, pupil with saccades, moods, bloom, grain, scan tears, chromatic ghosting) · ARENA (160×240 one-bit games, 3×5 pixel font, particles, shake, haptics) · BACKEND (`askClaude`, the streaming client and the mock) · GATE (the flow) · INPUT · WAKE. A console handle `GK` exposes the pieces (`GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`).
+- `index.html` — the page. Sections: CONFIG · AUDIO (buses, convolver reverb, the drone with its heartbeat and metallic hits, a combat pulse with a kick, hats and a danger alarm, one-bit sfx) · VOICE (`speechSynthesis` pitched to the floor over a synthesized demon layer: detuned sub-bass, ring modulation, an asymmetric clipper, a throat formant that jumps on every word, static crackle, reverb; synced subtitles; `SpeechRecognition`) · EYE (almond lids, heartbeat-synced veins, a pre-rendered fibrous iris in two counter-rotating layers, pupil with saccades, moods, bloom, grain, scan tears, chromatic ghosting) · ARENA (160×240 one-bit games with tiers, banners and a danger state that drives the music, 3×5 pixel font, particles, shake, haptics) · BACKEND (`askClaude`, the streaming client and the mock) · GATE (the flow) · INPUT · WAKE. A console handle `GK` exposes the pieces (`GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`, `GK.arena.run(GK.arena.byName('sigil'), 2)`, `GK.arena.current()`).
 - `server.mjs` — HTTP server, auth, SSE, oracle selection.
 - `server/oracle-claude-code.mjs` — spawns `claude -p … --output-format stream-json`, streams deltas and tool activity, resumes sessions.
 - `server/oracle-api.mjs` — Anthropic SDK streaming tool-use loop; validates tool inputs, handles `refusal` / `pause_turn` / `max_tokens`, maps API errors to in-character messages. Starts over when a conversation outgrows its budget, or compacts with `COMPACT=1`.
@@ -106,7 +111,7 @@ npx playwright install chromium && npm run test:e2e   # headless Chromium: stand
 
 ### Adding a game
 
-Write an object with `name`, `brief`, `help` (`[touch hint, keyboard hint]`), `init()` returning a state, `step(state, dt)` returning `true` to win, `false` to lose or nothing to continue, and `draw(state)` using the one-bit helpers (`px`, `text`, `sprite`, `burst`, `flash`, `shake`), then add it to `GAMES`. If the state has `x` or `px`, the eye behind the arena watches it.
+Write an object with `name`, `brief` (a string, or a function of the tier), `help` (`[touch hint, keyboard hint]`), `init(level)` returning a state (`level` is how many trials the player has won; make it bite), `step(state, dt)` returning `true` to win, `false` to lose or nothing to continue, and `draw(state)` using the one-bit helpers (`px`, `text`, `sprite`, `burst`, `flash`, `shake`, `note(state, 'BANNER')`), then add it to `GAMES`. Movement comes from `paddleInput` and `firing`; discrete presses (arrows, WASD, or a tap read by its quadrant) from `takeTaps()`. Optional state fields the arena reads: `heat` (0..1, the music climbs with it), `danger` (red pulsing frame, alarm in the beat), `look` (where the eye behind the arena stares; otherwise it follows `px` or `x`), `inverted` (draw the screen negative) and `why` (a line under TERMINATED).
 
 ### Adding lines
 
@@ -115,5 +120,5 @@ Append strings to `TAUNTS`, `LOSE`, `LOSE_AGAIN`, `WIN`, `WIN_STREAK`, `CONSULT`
 ## Known limits
 
 - Speech recognition is Chrome and Safari only and needs https or localhost. The text field always works.
-- Browser TTS cannot be routed through Web Audio, so the distortion and reverb run on a synthesized layer underneath it. Voice quality varies by OS; Windows and macOS have the deepest default voices. iOS may ignore the pitch setting, so the mechanical layer does most of the work there.
+- Browser TTS cannot be routed through Web Audio, so the distortion and reverb run on a synthesized layer underneath it; the engine itself is only asked for the lowest pitch it offers. Voice quality varies by OS; Windows and macOS have the deepest default voices. iOS may ignore the pitch setting, so the demon layer does most of the work there.
 - The `api` oracle's request shape (streaming, adaptive thinking, `fallbacks: "default"`, eager tool-input streaming, the MCP connector) is verified against a mock of the Messages API in the tests; it has not been exercised against the live API from this repository.
