@@ -1,14 +1,16 @@
 {
   "name": "gatekeeper-eye",
+  "productName": "Gatekeeper",
   "version": "1.0.0",
   "private": true,
-  "description": "A red eye that guards a Claude session. A static page (no build step) plus an optional bridge to Claude Code or the Claude API.",
+  "description": "A red eye that guards a Claude session: a desktop app that finds Claude Code on this machine and answers through it, after you beat its trial.",
   "type": "module",
-  "main": "server.mjs",
+  "main": "desktop/main.mjs",
   "scripts": {
-    "start": "node server.mjs",
+    "start": "electron .",
     "test": "node --test test/*.test.mjs",
-    "test:e2e": "node test/e2e.mjs"
+    "test:e2e": "node test/e2e.mjs",
+    "dist": "electron-builder"
   },
   "engines": {
     "node": ">=20"
@@ -18,7 +20,30 @@
     "@modelcontextprotocol/sdk": "^1.32.1"
   },
   "devDependencies": {
+    "electron": "^44.6.0",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.50.0"
+  },
+  "build": {
+    "appId": "dev.gatekeeper.eye",
+    "productName": "Gatekeeper",
+    "files": [
+      "index.html",
+      "web/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
   },
   "license": "MIT"
 }

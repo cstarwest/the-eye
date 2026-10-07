@@ -5,6 +5,7 @@
 import { appendFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
+if (args[0] === '--version') { process.stdout.write('9.9.9 (Claude Code)\n'); process.exit(0); }
 const q = args[args.indexOf('-p') + 1] || '';
 const resumed = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null;
 if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify(args) + '\n');

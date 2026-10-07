@@ -1,19 +1,37 @@
-// End-to-end in headless Chromium: the page on its own (mock in the browser)
-// and the page served by the bridge with the mock oracle (streamed readout).
-// Needs `npx playwright install chromium` once, or CHROMIUM=/path/to/chrome.   node test/e2e.mjs
-import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+// End-to-end in the desktop app itself (Electron, driven by Playwright):
+//   1. no Claude Code on this machine: the mock answers, every game plays, the hidden panel
+//   2. Claude Code installed (a stand-in CLI on PATH): found on its own, linked, answers stream
+// On a Linux machine without a display, run it under xvfb-run:   xvfb-run -a npm run test:e2e
+import { _electron as electron } from 'playwright';
+import electronPath from 'electron';
+import { mkdir, mkdtemp, symlink, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url)), root = join(here, '..'), OUT = join(here, 'shots');
 await mkdir(OUT, { recursive: true });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const errors = [];
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--autoplay-policy=no-user-gesture-required', '--use-gl=swiftshader'] });
-const newPage = async () => { const p = await browser.newPage({ viewport: { width: 1280, height: 800 } }); p.on('pageerror', e => errors.push('pageerror: ' + e.message)); p.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); }); return p; };
 const fail = msg => { console.error('FAIL:', msg); process.exitCode = 1; };
+
+// A clean machine: its own user data, a HOME with nothing installed, no API key, no ORACLE,
+// and a PATH holding only node plus whatever `extra` adds.
+async function launch(name, extra = []) {
+  const base = await mkdtemp(join(tmpdir(), `gk-e2e-${name}-`));
+  const nodeDir = join(base, 'node'); await mkdir(nodeDir); await symlink(process.execPath, join(nodeDir, 'node'));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ANTHROPIC_|ORACLE$|CLAUDE_BIN$|REPO$|MODEL$)/.test(k)));
+  Object.assign(env, { HOME: join(base, 'home'), GATEKEEPER_USER_DATA: join(base, 'user-data'), GATEKEEPER_SHELL_ENV: '0', PATH: [...extra, nodeDir, '/usr/bin', '/bin'].join(delimiter) });
+  await mkdir(env.HOME);
+  const args = [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--autoplay-policy=no-user-gesture-required', root];
+  const app = await electron.launch({ executablePath: electronPath, args, env, cwd: root });
+  const page = await app.firstWindow();
+  await page.setViewportSize({ width: 1280, height: 800 }).catch(() => {});
+  page.on('pageerror', e => errors.push(`${name} pageerror: ${e.message}`));
+  page.on('console', m => { if (m.type() === 'error') errors.push(`${name} console: ${m.text()}`); });
+  await page.waitForLoadState('domcontentloaded');
+  return { app, page, base };
+}
 
 // Plays whichever game is running, competently but legally: the paddle games by moving
 // the player (the state is live) away from whatever would hit it soonest, the sigil by
@@ -60,10 +78,11 @@ async function autopilot(page, ms) {
   }
 }
 
-// 1. the page alone: wake, ask, win, read
+// 1. no Claude Code installed: the app falls back to the mock on its own
 {
-  const page = await newPage();
-  await page.goto('file://' + join(root, 'index.html'));
+  const { app, page } = await launch('mock');
+  const sealed = await page.evaluate(() => ({ require: typeof require, process: typeof process, bridge: typeof window.gatekeeper }));
+  if (sealed.require !== 'undefined' || sealed.process !== 'undefined' || sealed.bridge !== 'object') fail('the window should see the bridge and nothing of Node: ' + JSON.stringify(sealed));
   await page.click('#wake'); await sleep(2800);
   const fps = await page.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; performance.now() - t0 < 2000 ? requestAnimationFrame(f) : r(n / 2); }; requestAnimationFrame(f); }));
   console.log('idle fps ~', fps.toFixed(0));
@@ -74,12 +93,16 @@ async function autopilot(page, ms) {
   await sleep(2600); await page.screenshot({ path: join(OUT, 'game.png') });
   await page.evaluate(() => GK.arena.end(true));
   await page.waitForSelector('#answer.on', { timeout: 20000 });
+  await page.waitForFunction(() => document.getElementById('abody').textContent.length > 40, null, { timeout: 30000 });
+  const partial = await page.textContent('#abody');
+  await page.screenshot({ path: join(OUT, 'streaming.png') });
   await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
   await page.screenshot({ path: join(OUT, 'answer.png') });
   const text = await page.textContent('#abody'), stamp = await page.textContent('#astamp');
+  if (!(partial.length < text.length)) fail('readout did not stream (partial ' + partial.length + ' vs ' + text.length + ')');
   if (!/214 tests/.test(text)) fail('mock answer missing: ' + text);
   if (!/^MOCK · SESSION/.test(stamp)) fail('stamp: ' + stamp);
-  console.log('standalone:', stamp, '|', text.slice(0, 60) + '…');
+  console.log('mock:', stamp, '|', text.slice(0, 60) + '…');
   const wonGame = await page.textContent('#gtitle'), skill1 = await page.evaluate(() => GK.arena.skill());
   if (!skill1[wonGame] || skill1[wonGame].tier !== 1 || skill1[wonGame].won !== 1) fail('the win did not raise that game\'s tier: ' + JSON.stringify(skill1));
   // lose path
@@ -115,12 +138,14 @@ async function autopilot(page, ms) {
     if (won !== true) fail(name + ' did not resolve as a win when ended');
   }
 
-  // the setup gear: opens the card; a page open as a file is not linked, and the dot is hollow
+  // the setup gear: opens the card; with no Claude Code the mock answers, and the dot is hollow
   await page.click('#setup-btn');
   await page.waitForSelector('#setup.on', { timeout: 3000 });
-  const link0 = await page.textContent('#st-link');
-  if (!/NOT LINKED/.test(link0)) fail('setup in standalone should say NOT LINKED: ' + link0);
-  if (await page.getAttribute('#setup-btn', 'data-link') !== 'off') fail('gear dot should be off in standalone');
+  const link0 = await page.textContent('#st-link'), claude0 = await page.textContent('#st-claude'), oracle0 = await page.textContent('#st-oracle');
+  if (link0 !== 'NOT LINKED · MOCK ANSWERS' || claude0 !== 'not found' || oracle0 !== 'MOCK') fail(`setup without Claude Code: ${link0} / ${claude0} / ${oracle0}`);
+  if (await page.getAttribute('#setup-btn', 'data-link') !== 'off') fail('gear dot should be off without Claude Code');
+  if (await page.isVisible('#mic')) fail('MIC should be hidden in the desktop app');
+  await page.screenshot({ path: join(OUT, 'setup-mock.png') });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.getElementById('setup').classList.contains('on'), null, { timeout: 3000 });
 
@@ -162,66 +187,38 @@ async function autopilot(page, ms) {
   await page.waitForSelector('#stage.on', { timeout: 15000 });
   await page.evaluate(() => GK.arena.end(false));
   await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 30000 });
-  await page.close();
+  await app.close();
 }
 
-// 2. served by the bridge (mock oracle): bridge detected, readout streamed
+// 2. Claude Code installed: nothing to configure, the app finds it, links, and answers through it
 {
-  const port = 3900 + Math.floor(Math.random() * 90);
-  const server = spawn(process.execPath, [join(root, 'server.mjs')], { env: { ...process.env, ORACLE: 'mock', PORT: String(port), REPO: root }, stdio: ['ignore', 'pipe', 'inherit'] });
-  let serverLog = '';
-  server.stdout.on('data', d => { serverLog += d; });
-  await new Promise(r => server.stdout.on('data', d => { if (/gatekeeper on/.test(d)) r(); }));
-  const asksSeen = () => (serverLog.match(/\] ask \(mock/g) || []).length;
-  try {
-    const page = await newPage();
-    await page.goto(`http://127.0.0.1:${port}/`);
-    await page.click('#wake'); await sleep(2800);
-    await page.fill('#q', 'how does auth work?'); await page.press('#q', 'Enter');
-    await page.waitForSelector('#stage.on', { timeout: 15000 }); await sleep(2200);
-    await page.evaluate(() => GK.arena.end(true));
-    await page.waitForSelector('#answer.on', { timeout: 20000 });
-    await page.waitForFunction(() => document.getElementById('abody').textContent.length > 40, null, { timeout: 30000 });
-    const partial = await page.textContent('#abody'), lineDuring = await page.textContent('#line');
-    await page.screenshot({ path: join(OUT, 'streaming.png') });
-    await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
-    const text = await page.textContent('#abody'), stamp = await page.textContent('#astamp');
-    if (!(partial.length < text.length)) fail('readout did not stream (partial ' + partial.length + ' vs ' + text.length + ')');
-    if (!/src\/auth/.test(text)) fail('bridge answer missing: ' + text);
-    if (!/^MOCK · SESSION/.test(stamp)) fail('bridge stamp: ' + stamp);
-    console.log('bridge:', stamp, '| line during stream:', JSON.stringify(lineDuring), '|', text.slice(0, 50) + '…');
-    // the setup card reports the bridge, and the gear's dot is lit
-    await page.click('#setup-btn'); await page.waitForSelector('#setup.on', { timeout: 3000 });
-    const link = await page.textContent('#st-link'), oracle = await page.textContent('#st-oracle'), repo = await page.textContent('#st-repo');
-    if (link !== 'LINKED' || !/MOCK/.test(oracle) || repo !== 'the-eye') fail(`setup status on the bridge: ${link} / ${oracle} / ${repo}`);
-    if (await page.getAttribute('#setup-btn', 'data-link') !== 'on') fail('gear dot should be on when bridged');
-    await page.screenshot({ path: join(OUT, 'setup.png') });
-    await page.close();
-
-    // 3. a page opened as a file finds the bridge through the setup card's button, remembers it, and asks through it
-    const p3 = await newPage();
-    await p3.goto('file://' + join(root, 'index.html'));
-    await p3.click('#wake'); await sleep(2800);
-    if (await p3.evaluate(() => GK.config.linked)) fail('a file page should not be linked before bridging');
-    const before = asksSeen();
-    const r = await p3.evaluate(port => GK.setup.autoBridge([`http://127.0.0.1:${port}`]), port);
-    if (!r || !r.ok) fail('auto-bridge failed: ' + JSON.stringify(r));
-    if (await p3.getAttribute('#setup-btn', 'data-link') !== 'on') fail('gear dot should light after auto-bridge');
-    const remembered = await p3.evaluate(() => JSON.parse(localStorage.getItem('gatekeeper.api') || 'null'));
-    if (!remembered || !String(remembered.api).includes(String(port))) fail('bridge not remembered: ' + JSON.stringify(remembered));
-    await p3.fill('#q', 'where are the tests?'); await p3.press('#q', 'Enter');
-    await p3.waitForSelector('#stage.on', { timeout: 15000 }); await sleep(1500);
-    await p3.evaluate(() => GK.arena.end(true));
-    await p3.waitForSelector('#answer.on', { timeout: 20000 });
-    await p3.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
-    const stamp3 = await p3.textContent('#astamp');
-    if (!/^MOCK · SESSION/.test(stamp3)) fail('auto-bridged stamp: ' + stamp3);
-    if (asksSeen() !== before + 1) fail(`the question did not reach the bridge (${before} -> ${asksSeen()})`);
-    console.log('auto-bridge:', r.api, '|', stamp3, '| asks at the bridge:', asksSeen());
-    await p3.close();
-  } finally { server.kill(); }
+  const binDir = await mkdtemp(join(tmpdir(), 'gk-e2e-bin-'));
+  const fake = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(fake, 0o755);
+  await symlink(fake, join(binDir, 'claude'));
+  const { app, page } = await launch('claude', [binDir]);
+  await page.click('#wake'); await sleep(2800);
+  await page.click('#setup-btn'); await page.waitForSelector('#setup.on', { timeout: 3000 });
+  await page.waitForFunction(() => document.getElementById('st-link').textContent === 'LINKED', null, { timeout: 10000 }).catch(() => {});
+  const link = await page.textContent('#st-link'), oracle = await page.textContent('#st-oracle'), claude = await page.textContent('#st-claude'), repo = await page.textContent('#st-repo');
+  if (link !== 'LINKED' || oracle !== 'CLAUDE CODE' || !claude.includes('9.9.9') || !claude.includes(binDir) || repo !== root) fail(`setup with Claude Code: ${link} / ${oracle} / ${claude} / ${repo}`);
+  if (await page.getAttribute('#setup-btn', 'data-link') !== 'on') fail('gear dot should be on when Claude Code is linked');
+  await page.screenshot({ path: join(OUT, 'setup.png') });
+  // FIND CLAUDE CODE looks again and finds the same one
+  const r = await page.evaluate(() => GK.setup.autoBridge());
+  if (!r || !r.ok || r.oracle !== 'CLAUDE CODE') fail('find again: ' + JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.fill('#q', 'where is the answer?'); await page.press('#q', 'Enter');
+  await page.waitForSelector('#stage.on', { timeout: 15000 }); await sleep(1500);
+  await page.evaluate(() => GK.arena.end(true));
+  await page.waitForSelector('#answer.on', { timeout: 20000 });
+  await page.waitForFunction(() => !document.getElementById('ask').disabled, null, { timeout: 90000 });
+  const text = await page.textContent('#abody'), stamp = await page.textContent('#astamp');
+  if (text !== 'The answer is forty-two. It lives in src/main.ts.') fail('Claude Code answer: ' + text);
+  if (!/^CLAUDE CODE · SESSION/.test(stamp)) fail('Claude Code stamp: ' + stamp);
+  console.log('claude code:', claude, '|', stamp, '|', text);
+  await page.screenshot({ path: join(OUT, 'claude-answer.png') });
+  await app.close();
 }
 
 console.log('errors:', errors.length ? errors : 'none');
 if (errors.length) process.exitCode = 1;
-await browser.close();

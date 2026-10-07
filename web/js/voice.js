@@ -146,7 +146,9 @@ const Voice = (() => {
   function stop() { if (hasTTS) speechSynthesis.cancel(); }
   function setTone(name) { tone = TONES[name] ? name : 'demon'; Object.assign(CONFIG.voice, TONES[tone]); }
 
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Electron has no speech-recognition service behind this API (Chrome's is Google's,
+  // keyed to Chrome), so the desktop app hides MIC and the question is typed.
+  const SR = CONFIG.desktop ? null : window.SpeechRecognition || window.webkitSpeechRecognition;
   function listen(onInterim) {
     return new Promise(res => {
       if (!SR) return res(null);

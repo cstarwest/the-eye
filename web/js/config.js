@@ -8,20 +8,20 @@
 
 // ------------------------------ CONFIG -------------------------------
 const CONFIG = {
-  // Point this at a server exposing POST /ask { question } -> { answer }
-  // (see server.mjs). Leave null to use the built-in mock oracle.
-  // Can also be set per visit with ?api=http://localhost:3000, or from the
-  // setup panel (the faint gear, top-left), which remembers it.
-  api: new URLSearchParams(location.search).get('api') || null,
-  key: new URLSearchParams(location.search).get('key') || null,   // sent as x-gatekeeper-key when set
+  // The bridge lives in the desktop app's main process (desktop/bridge.mjs) and
+  // is reached through window.gatekeeper, which desktop/preload.cjs provides.
+  // These mirror what it last reported; the setup card (the faint gear) shows them.
+  desktop: !!window.gatekeeper,
   session: (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0, 8),
-  oracle: null,                                                    // label reported by the bridge's /health
+  oracle: null,                                                    // CLAUDE CODE, API or MOCK
   model: null,
-  repo: null,
-  linked: false,                                                   // true once a bridge has answered /health
-  lastProbe: '',                                                   // what the last probe said, for the setup panel
-  // where the auto-bridge looks, in order, after the page's own origin
-  candidates: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  repo: null,                                                      // the repository's folder name
+  repoPath: null,
+  claude: null,                                                    // { path, version } of the Claude Code it found
+  linked: false,                                                   // true when a real Claude answers (not the mock)
+  needsRepo: false,                                                // a repository has to be chosen first
+  ready: false,                                                    // the bridge has an oracle that can answer
+  lastProbe: '',                                                   // what the bridge last said about itself
   voice: { pitch: 0.15, rate: 0.8 },      // as deep as the engine allows; the demon layer underneath does the rest
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
 };
