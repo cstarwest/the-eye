@@ -240,3 +240,34 @@ test('desktop: the window is locked down, and the page reaches nothing but the b
   assert.equal(pkg.main, 'desktop/main.mjs');
   for (const f of pkg.build.files) assert.ok(!/server|test/.test(f), f);
 });
+
+// a pid is gone once signal 0 cannot reach it
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+async function gone(pids, ms = 4000) { const t0 = Date.now(); while (pids.some(alive) && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 50)); return !pids.some(alive); }
+async function pidsFrom(file, ms = 5000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { const l = (await readFile(file, 'utf8')).trim().split('\n').pop(); if (l) return JSON.parse(l); } catch {} await new Promise(r => setTimeout(r, 50)); } throw new Error('no pids written'); }
+
+test('processes: stopAll ends every tracked tree, grandchildren too, even one that ignores SIGTERM', { skip: !posix }, async () => {
+  const { spawnTracked, stopAll, liveCount } = await import('../desktop/processes.mjs');
+  // a child that starts a grandchild ignoring SIGTERM, and reports its pid
+  const child = spawnTracked(process.execPath, ['-e', `const k = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: 'ignore' }); console.log(k.pid); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const grandchild = Number(await new Promise(r => child.stdout.once('data', d => r(String(d).trim()))));
+  assert.ok(alive(child.pid) && alive(grandchild));
+  assert.equal(liveCount(), 1);
+  await stopAll(500);
+  assert.ok(await gone([child.pid, grandchild]), 'the tree outlived stopAll');
+  assert.equal(liveCount(), 0);
+});
+
+test('claude-code oracle: a cancelled question stops claude and everything it started', { skip: !posix }, async () => {
+  const { createClaudeCodeOracle } = await import('../desktop/oracle-claude-code.mjs');
+  const bin = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(bin, 0o755);
+  const file = join(await mkdtemp(join(tmpdir(), 'gk-')), 'pids.log'); process.env.FAKE_CLAUDE_PIDS = file;
+  const oracle = createClaudeCodeOracle({ claudeBin: bin, repo: root });
+  const ac = new AbortController();
+  const pending = oracle.ask({ question: 'HANG please', session: 'h', emit: () => {}, signal: ac.signal });
+  const { claude, child } = await pidsFrom(file);
+  assert.ok(alive(claude) && alive(child));
+  ac.abort();
+  await assert.rejects(pending, /aborted/);
+  assert.ok(await gone([claude, child]), 'claude or its child outlived the cancel');
+});

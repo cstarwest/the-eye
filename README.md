@@ -8,11 +8,29 @@ Somewhere on the page there is a panel that was not meant to be opened.
 
 ## Quick start
 
+Double-click the launcher for your system, at the top of this folder (it needs [Node.js](https://nodejs.org) 20 or newer):
+
+| | |
+|---|---|
+| macOS | `Gatekeeper.command` |
+| Windows | `Gatekeeper.cmd` |
+| Linux | `gatekeeper.sh` (or run it from a terminal) |
+
+It installs the dependencies the first time (and again whenever `package-lock.json` changes), then opens the app in its own window. The launcher's terminal window stays open beside it: close the app and the launcher exits; close the launcher's window (or press Ctrl+C in it) and the app quits.
+
+From a terminal the same thing is:
+
 ```sh
-npm install
-npm start                      # opens the app; it reads this checkout unless you choose another repository
-npm start -- /path/to/repo     # or point it at one (remembered)
+npm run launch                         # or: node desktop/launch.mjs
+npm run launch -- /path/to/repo        # point it at a repository (remembered)
+npm start                              # the app alone, once npm install has run
 ```
+
+The app reads this checkout unless you choose another repository.
+
+### Closing it
+
+Closing the window quits the app, on every platform (on macOS too, where apps usually linger in the Dock). Quitting stops everything the app started before it exits: the question in progress is cancelled, Claude Code is stopped together with whatever it started (its tools, its MCP servers), the MCP servers the API oracle started are closed, and any git or ripgrep search still running is ended. Each of those runs in its own process group (on Windows, its own process tree), so stopping one stops its children too; what has not stopped two seconds after being asked is killed.
 
 Tap once to wake the eye. With Claude Code installed and signed in (`claude` has been run once in a terminal), the gear's dot is lit and the answers come from Claude Code reading your repository. Without it, a mock answers in character and the games still work.
 
@@ -118,8 +136,8 @@ Leave it alone long enough and it mutters at you, and now and then glances at a 
 ## Tests
 
 ```sh
-npm test                 # repo tools, both oracles (fake CLI / mock Messages API + MCP), finding Claude Code (PATH, install locations, Windows shims, login shell), the bridge (oracle choice, repository, cancel), the window's lockdown, every page script parses and loads in order
-npm run test:e2e         # the desktop app under Playwright: no Claude Code (mock, every game under an autopilot, the hidden panel from screws to corruption), then a stand-in Claude Code on PATH found, linked and answering
+npm test                 # process trees stopped (grandchildren too), repo tools, both oracles (fake CLI / mock Messages API + MCP), finding Claude Code (PATH, install locations, Windows shims, login shell), the bridge (oracle choice, repository, cancel), the window's lockdown, every page script parses and loads in order
+npm run test:e2e         # the desktop app under Playwright: no Claude Code (mock, every game under an autopilot, the hidden panel from screws to corruption), a stand-in Claude Code on PATH found, linked and answering, the window closed mid-answer (claude and its child stopped), and the launcher (it exits with the app, and the app with it)
 xvfb-run -a npm run test:e2e   # the same on a Linux machine without a display
 ```
 
@@ -140,7 +158,10 @@ xvfb-run -a npm run test:e2e   # the same on a Linux machine without a display
 - `web/js/input.js`, `web/js/main.js` — buttons and keys; the wake tap and the console handle.
 
   A console handle `GK` exposes the pieces: `GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`, `GK.arena.run(GK.arena.byName('sigil'), 2)`, `GK.arena.current()`, `GK.arena.skill()`, `GK.arena.forget()`, `GK.bridge.auto()`, `GK.bridge.chooseRepo()`, `GK.setup.show(true)`, `GK.switch.state()`, `GK.switch.hold(ms)` (how long friendly lasts), `GK.switch.corrupt()`. Each game's tier is kept in `localStorage` under `gatekeeper.skill`.
-- `desktop/main.mjs` — the Electron main process: the window and its lockdown, the menu, the folder picker, IPC to the bridge, one instance at a time (a second launch with a folder hands it to the first).
+- `Gatekeeper.command`, `Gatekeeper.cmd`, `gatekeeper.sh` — the double-click launchers; each finds Node and runs `desktop/launch.mjs`.
+- `desktop/launch.mjs` — installs dependencies when needed, starts the app, and ties the two together: either one closing closes the other.
+- `desktop/main.mjs` — the Electron main process: the window and its lockdown, the menu, the folder picker, IPC to the bridge, one instance at a time (a second launch with a folder hands it to the first), and the quit that waits for every process to stop.
+- `desktop/processes.mjs` — every process the app starts goes through here, in its own process group, so quitting can stop each one with everything under it.
 - `desktop/preload.cjs` — `window.gatekeeper`, the window's only way out.
 - `desktop/bridge.mjs` — picks the oracle, keeps the repository and the settings file, answers and cancels questions. Plain Node, so the tests drive it without Electron.
 - `desktop/find-claude.mjs` — finds Claude Code: the login shell's PATH, the install locations, Windows shims.

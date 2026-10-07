@@ -8,6 +8,7 @@
   "main": "desktop/main.mjs",
   "scripts": {
     "start": "electron .",
+    "launch": "node desktop/launch.mjs",
     "test": "node --test test/*.test.mjs",
     "test:e2e": "node test/e2e.mjs",
     "dist": "electron-builder"
@@ -31,6 +32,7 @@
       "index.html",
       "web/**",
       "desktop/**",
+      "!desktop/launch.mjs",
       "package.json"
     ],
     "mac": {
