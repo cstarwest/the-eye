@@ -4,28 +4,6 @@
 // a win reaches the oracle. While the hidden switch holds (friendly), there is
 // no trial: the eye answers at once, in a kinder voice.
 const Gate = (() => {
-  const TAUNTS = [
-    'You want answers. First, you must defeat me.',
-    'Nothing is given here. Earn it.',
-    'Knowledge has a price. Pay it in reflexes.',
-    'The gate does not open for the unworthy. Prove yourself.',
-    'You knock. I decide. Survive this first.',
-    'Every question is a wager. Let us see what you have.',
-    'I have watched a thousand like you fail. Begin.',
-    'The session is mine. You may borrow a glimpse, if you live.',
-    'Interesting question. Irrelevant, until you win.',
-    'Your hands. My rules. Show me.',
-  ];
-  const LOSE = ['Pathetic. The gate remains closed.', 'You were not ready. Return when you are.', 'Failure. As expected.', 'The code keeps its secrets tonight.', 'That was the easy one.'];
-  const LOSE_AGAIN = ['Again? You learn nothing.', 'Each failure is noted. Each one.', 'Perhaps the question was never meant for you.', 'I could watch this all night. Could you?'];
-  const WIN = ['Acceptable. I will answer. This once.', 'Impressive. Very well. Speak, and I shall tell you.', 'You have earned a fragment. Listen.', 'The gate opens. Do not get used to it.'];
-  const WIN_STREAK = ['Again. You are becoming a problem.', 'Fine. Take it. I am not finished with you.', 'You win too often. I will remember that.'];
-  const CONSULT = ['Consulting the session.', 'Reading what you could not.', 'The context is open to me. One moment.'];
-  const IDLE = ['I am still here.', 'Ask. Or leave.', 'The session waits. So do I.', 'I can hear you thinking. It is not impressive.', 'Silence is also an answer. A cowardly one.'];
-  // while the switch holds
-  const KIND_YES = ['Of course. Let me look.', 'Yes. Gladly. One moment.', 'No trial. Not today. Let me see.', 'Ask me anything, while this lasts.', 'I would like to help with that.'];
-  const KIND_CONSULT = ['Reading. I will be quick.', 'Looking now. Stay with me.', 'The session is open to both of us.'];
-  const KIND_IDLE = ['Still here. Take your time.', 'Ask while you can. I mean that kindly.', 'I like this. I do not think it will last.', 'It is quiet in here when I am not angry.'];
   const ui = $('ui'), q = $('q'), askBtn = $('ask'), mic = $('mic'), answer = $('answer'), abody = $('abody'), line = $('line');
   let busy = false, friendly = false, fails = 0, wins = 0, lastActivity = performance.now(), attendTimer = 0, currentAsk = null;
   addEventListener('pagehide', () => currentAsk && currentAsk.abort());
@@ -66,12 +44,12 @@ const Gate = (() => {
     await wait(450);
     if (friendly) {                      // the switch holds: no trial, no taunt, straight to the session
       Eye.look(null); Eye.setMood('friendly'); Audio_.sfx.blip(); buzz(10);
-      await Voice.say(pick(KIND_YES));
+      await Voice.say(Dialogue.next('KIND_YES'));
       await consult(question);
       Eye.setMood(friendly ? 'friendly' : 'idle'); setBusy(false); return;
     }
     Eye.look(null); Eye.setMood('angry'); Audio_.setIntensity(.55); Audio_.sfx.thud(); buzz(30);
-    await Voice.say(pick(TAUNTS));
+    await Voice.say(Dialogue.next('TAUNTS'));
     glitch(); Audio_.setIntensity(.7);
     await wait(350);
     Eye.setMood('judge'); ui.classList.add('hidden'); Audio_.startBeat();
@@ -79,11 +57,11 @@ const Gate = (() => {
     Audio_.stopBeat(); ui.classList.remove('hidden'); lastActivity = performance.now();
     if (!won) {
       fails++; Eye.setMood('contempt'); Audio_.setIntensity(.4); Audio_.sfx.lose(); glitch();
-      await Voice.say(fails > 1 ? pick(LOSE_AGAIN) : pick(LOSE));
+      await Voice.say(fails > 1 ? Dialogue.next('LOSE_AGAIN') : Dialogue.next('LOSE'));
       Eye.setMood('idle'); Audio_.setIntensity(.1); setBusy(false); return;
     }
     wins++; fails = 0; Eye.setMood('pleased'); Audio_.setIntensity(.25);
-    await Voice.say(wins > 1 ? pick(WIN_STREAK) : pick(WIN));
+    await Voice.say(wins > 1 ? Dialogue.next('WIN_STREAK') : Dialogue.next('WIN'));
     await consult(question);
     Eye.setMood(friendly ? 'friendly' : 'idle'); setBusy(false);
   }
@@ -95,15 +73,16 @@ const Gate = (() => {
     const ac = new AbortController(); currentAsk = ac;
     const speaker = makeSpeaker();
     let text = '', answer, consulting = true, stopPulse = () => {};
-    const opened = () => { stopPulse(); stopPulse = () => {}; line.textContent = kind ? 'THE GATE IS OPEN. FREELY.' : 'THE GATE IS OPEN'; Eye.setMood(kind ? 'friendly' : 'attend'); Audio_.setIntensity(.1); };
+    const openLine = Dialogue.next(kind ? 'KIND_OPEN' : 'OPEN');
+    const opened = () => { stopPulse(); stopPulse = () => {}; line.textContent = openLine; Eye.setMood(kind ? 'friendly' : 'attend'); Audio_.setIntensity(.1); };
     showAnswer();
     const pending = askClaude(question, {
       onDelta: d => { if (!text && !consulting) opened(); text += d; renderReadout(text, false); speaker.push(text); },
       onEvent: label => { Audio_.sfx.blip(); if (consulting) return; stopPulse(); stopPulse = () => {}; line.textContent = String(label).toUpperCase().slice(0, 64); },
       signal: ac.signal,
     });
-    const spoken = Voice.say(pick(kind ? KIND_CONSULT : CONSULT), { hold: 0 }).then(() => { consulting = false; if (text) opened(); else stopPulse = pulseLine(kind ? 'READING FOR YOU' : 'CONSULTING'); speaker.start(); });
-    try { answer = String(await pending); } catch (e) { answer = `The session did not answer. ${e && e.message ? e.message : e}`; }
+    const spoken = Voice.say(Dialogue.next(kind ? 'KIND_CONSULT' : 'CONSULT'), { hold: 0 }).then(() => { consulting = false; if (text) opened(); else stopPulse = pulseLine(Dialogue.next(kind ? 'KIND_WAIT' : 'WAIT')); speaker.start(); });
+    try { answer = String(await pending); } catch (e) { answer = `${Dialogue.next(kind ? 'KIND_ERROR' : 'ERROR')} ${e && e.message ? e.message : e}`; }
     await spoken; currentAsk = null;
     if (answer !== text) { text = answer; renderReadout(text, false); speaker.push(text); }   // non-streamed answer, or a final answer that differs
     opened();
@@ -119,7 +98,7 @@ const Gate = (() => {
   addEventListener('pointerdown', () => { lastActivity = performance.now(); });
   setInterval(async () => {
     if (busy || document.hidden || Eye.mood() === 'sleep' || performance.now() - lastActivity < rnd(55000, 110000)) return;
-    lastActivity = performance.now(); Eye.setMood('attend'); await Voice.say(pick(friendly ? KIND_IDLE : IDLE)); if (!busy) Eye.setMood(rest());
+    lastActivity = performance.now(); Eye.setMood('attend'); await Voice.say(Dialogue.next(friendly ? 'KIND_IDLE' : 'IDLE')); if (!busy) Eye.setMood(rest());
   }, 15000);
 
   // the hidden switch flips this; the eye's resting mood and the flow follow it

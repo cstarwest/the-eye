@@ -14,10 +14,10 @@
   else mic.onclick = async () => {
     if (Gate.busy() || mic.classList.contains('live')) return;
     mic.classList.add('live'); Eye.setMood('attend'); Audio_.sfx.blip();
-    await Voice.say(Gate.friendly() ? 'Go ahead.' : 'Speak.', { hold: 0 });
+    await Voice.say(Dialogue.next(Gate.friendly() ? 'KIND_LISTEN' : 'LISTEN'), { hold: 0 });
     const heard = await Voice.listen(t => { q.value = t; });
     mic.classList.remove('live');
     if (heard) { q.value = heard; Gate.gate(heard); }
-    else { await Voice.say(Gate.friendly() ? 'I did not catch that. Try again?' : 'I heard nothing.'); if (!Gate.busy()) Eye.setMood(Gate.friendly() ? 'friendly' : 'idle'); }
+    else { await Voice.say(Dialogue.next(Gate.friendly() ? 'KIND_UNHEARD' : 'UNHEARD')); if (!Gate.busy()) Eye.setMood(Gate.friendly() ? 'friendly' : 'idle'); }
   };
 }

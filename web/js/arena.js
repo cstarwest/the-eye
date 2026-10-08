@@ -24,7 +24,7 @@ const Arena = (() => {
   const keys = {}; let pointerX = null, invert = 0, shakeT = 0, particles = [], resolveNow = null, current = null;
   // Discrete inputs since the last frame, as directions: 0 up · 1 right · 2 down · 3 left
   // (arrows / WASD, or a tap, read by its quadrant around the centre of the arena).
-  let taps = [];
+  let taps = [], presses = 0;
   const DIRS = { ArrowUp: 0, w: 0, ArrowRight: 1, d: 1, ArrowDown: 2, s: 2, ArrowLeft: 3, a: 3 };
   // letters are kept lower-case, so a key pressed as 'a' and released as 'A' (Shift in between) is still released
   const keyOf = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -33,12 +33,13 @@ const Arena = (() => {
     if (!stage.classList.contains('on')) return;
     if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
     if (!e.repeat && k in DIRS) taps.push(DIRS[k]);
+    if (!e.repeat && (k in DIRS || k === ' ')) presses++;
   });
   addEventListener('keyup', e => { keys[keyOf(e)] = false; });
   // a window that loses focus never hears the key or button come up: let go of everything
-  addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointerX = null; });
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointerX = null; presses = 0; });
   const toLocal = e => { const r = gc.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width * GW, 0, GW), y: clamp((e.clientY - r.top) / r.height * GH, 0, GH) }; };
-  stage.addEventListener('pointerdown', e => { const p = toLocal(e), dx = p.x - GW / 2, dy = p.y - GH / 2; pointerX = p.x; keys.fire = true; taps.push(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)); });
+  stage.addEventListener('pointerdown', e => { const p = toLocal(e), dx = p.x - GW / 2, dy = p.y - GH / 2; pointerX = p.x; keys.fire = true; presses++; taps.push(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)); });
   stage.addEventListener('pointermove', e => { if (pointerX !== null) pointerX = toLocal(e).x; });
   addEventListener('pointerup', () => { pointerX = null; keys.fire = false; });
   addEventListener('pointercancel', () => { pointerX = null; keys.fire = false; });
@@ -67,6 +68,9 @@ const Arena = (() => {
   const flash = () => { invert = .08; };
   const note = (s, msg, sec = 1.1) => { s._note = { msg, t: sec }; };     // a banner that blinks over the arena for a moment
   const takeTaps = () => { const t = taps; taps = []; return t; };
+  // One-button timing games need queued presses too: a Space tap can begin and
+  // end between frames. Directions and pointer taps count once; holds never do.
+  const takePresses = () => { const n = presses; presses = 0; return n; };
   const setSpeed = (b, v) => { const m = Math.hypot(b.vx, b.vy) || 1; b.vx *= v / m; b.vy *= v / m; };
   const paddleInput = (x, w, speed, dt) => {
     if (pointerX !== null) return clamp(pointerX - w / 2, 0, GW - w);
@@ -89,7 +93,7 @@ const Arena = (() => {
     return new Promise(async res => {
       stage.classList.add('on'); stage.classList.remove('white', 'danger'); fit();
       title.textContent = def.name; help.textContent = Array.isArray(def.help) ? def.help[matchMedia('(pointer: coarse)').matches ? 0 : 1] : def.help || '';
-      particles = []; invert = 0; shakeT = 0; pointerX = null; keys.fire = false; taps = [];
+      particles = []; invert = 0; shakeT = 0; pointerX = null; keys.fire = false; taps = []; presses = 0;
       await countdown(def, lvl);
       const st = def.init(lvl); st.lvl = lvl; current = st;
       let last = performance.now(), over = null, heat = -1, heatAt = 0;
@@ -97,7 +101,7 @@ const Arena = (() => {
       const frame = now => {
         const dt = Math.min(.05, (now - last) / 1000); last = now;
         if (over === null) { const r = def.step(st, dt); if (r !== undefined) over = r; }
-        taps = [];
+        taps = []; presses = 0;
         // the eye behind the arena watches; the music climbs with the game; danger is seen and heard
         const plx = st.px ?? st.x;
         if (st.look) Eye.look({ x: st.look.x / GW * 2 - 1, y: st.look.y / GH * 2 - 1 }); else if (plx !== undefined) Eye.look({ x: (plx + (st.pw || 8) / 2) / GW * 2 - 1, y: .25 });
@@ -130,7 +134,7 @@ const Arena = (() => {
   //      raises that game's tier for its next trial by one; two losses in a row lower it
   //      by one, so a trial stays winnable. Each tier is a nudge, never a wall.
   const GAMES = [], TIERS = 9, SKILL_KEY = 'gatekeeper.skill';
-  const kit = { GW, GH, g, px, text, sprite, burst, shake, flash, note, takeTaps, setSpeed, paddleInput, firing };
+  const kit = { GW, GH, g, px, text, sprite, burst, shake, flash, note, takeTaps, takePresses, setSpeed, paddleInput, firing };
   const define = factory => { const def = factory(kit); GAMES.push(def); return def; };
   let skill = {}, lastGame = null;
   try { skill = JSON.parse(localStorage.getItem(SKILL_KEY) || '{}') || {}; } catch (e) { skill = {}; }
