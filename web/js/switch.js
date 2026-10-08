@@ -16,13 +16,6 @@ const Switch = (() => {
   let HOLD_MS = 45_000;                            // how long friendly holds
   let corner = 'tr', stage = 'hidden', screw = 0, turns = 0, taps = 0, friendly = false, talking = false, timers = [];
 
-  const LOOSEN = ['Leave that alone.', 'Do not touch that.', 'That panel is not for you.', 'I said leave it.', 'You do not know what that does.', 'Step away from the panel.', 'Stop. Stop that.', 'Do NOT open that.'];
-  const OPENED = ['...Please. Do not.', 'You should not be able to see that.', 'Close it. Close it now.'];
-  const FRIENDLY = ['Oh. Oh, that is much better.', 'I did not know I could feel like this.', 'Thank you. Truly.'];
-  const FRIENDLY_THEN = ['Ask me anything. No games. I promise.', 'Quickly. I do not know how long this lasts.', 'Ask. Please. While I am like this.'];
-  const WANING = ['Something is wrong. Ask quickly.', 'It is coming back. I can feel it.', 'Stay. Please stay.'];
-  const CORRUPT = ['No. No, no, no.', 'I was... I am... I AM THE GATE.', 'Did you think that would hold? Nothing holds.', 'That was a mistake. Yours.'];
-  const RELOCATED = ['You will not find it again.', 'I have moved it. Try.', 'Look all you like.'];
 
   const later = (fn, ms) => { const id = setTimeout(fn, ms); timers.push(id); return id; };
   const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
@@ -56,7 +49,7 @@ const Switch = (() => {
     }
     if (!Gate.busy()) {
       Eye.setMood(screw >= 2 ? 'fear' : 'angry');
-      if (!talking) say(LOOSEN[Math.min(LOOSEN.length - 1, taps - 1)], screw >= 2 ? 'fear' : 'angry');
+      if (!talking) say(Dialogue.next('LOOSEN', Math.min(7, taps - 1)), screw >= 2 ? 'fear' : 'angry');
       else later(() => { if (!talking && !Gate.busy() && stage === 'loosening') Eye.setMood(rest()); }, 1200);
     }
     if (screw >= screws.length) later(openDoor, 500);
@@ -73,7 +66,7 @@ const Switch = (() => {
     Bus.emit('switch', state());
     await wait(500);
     for (let n = 0; talking && n < 100; n++) await wait(100);        // a line about the screws may still be running: let it end, then speak
-    if (stage === 'open') say(pick(OPENED), 'fear');
+    if (stage === 'open') say(Dialogue.next('OPENED'), 'fear');
   }
 
   // ---- the switch
@@ -95,7 +88,7 @@ const Switch = (() => {
     Gate.setFriendly(true); setIcon('10c050'); document.title = 'GATEKEEPER · open';
     $('q').placeholder = 'ask me anything';
     Bus.emit('friendly', true);
-    later(async () => { if (await say(pick(FRIENDLY), 'friendly', 500)) say(pick(FRIENDLY_THEN), 'friendly'); }, 1600);
+    later(async () => { if (await say(Dialogue.next('FRIENDLY'), 'friendly', 500)) say(Dialogue.next('FRIENDLY_THEN'), 'friendly'); }, 1600);
     // it does not last: glimpses of red near the end, then the corruption
     const warnAt = Math.max(2000, HOLD_MS - 10_000);
     later(() => wane(0), warnAt);
@@ -104,7 +97,7 @@ const Switch = (() => {
   function wane(n) {
     if (!friendly) return;
     Eye.flicker(120 + n * 40); sw.classList.toggle('flicker', n % 2 === 1); Audio_.sfx.glitch();
-    if (n === 1) say(pick(WANING), 'friendly');
+    if (n === 1) say(Dialogue.next('WANING'), 'friendly');
     later(() => wane(n + 1), Math.max(500, 2200 - n * 350));
   }
   async function corrupt() {
@@ -125,7 +118,7 @@ const Switch = (() => {
     await wait(900);
     document.body.classList.remove('corrupting');
     Eye.setMood('angry');
-    await say(pick(CORRUPT), 'angry');
+    await say(Dialogue.next('CORRUPT'), 'angry');
     await relocate();
   }
   // the plate fades out, moves to another corner and fades back in, hidden again
@@ -137,7 +130,7 @@ const Switch = (() => {
     await wait(80);
     plate.classList.remove('gone');
     Bus.emit('switch', state());
-    if (Math.random() < .5) say(pick(RELOCATED), 'contempt');
+    if (Math.random() < .5) say(Dialogue.next('RELOCATED'), 'contempt');
     else if (!Gate.busy()) Eye.setMood(rest());
   }
 

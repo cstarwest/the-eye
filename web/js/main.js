@@ -12,7 +12,7 @@ $('wake').addEventListener('click', async function () {
   setTimeout(() => this.remove(), 1400);
   await wait(2300);
   Eye.setMood('idle'); Audio_.setIntensity(.1);
-  await Voice.say(pick(['I am awake. Ask, if you dare.', 'You woke me. Make it worth it.', 'The session is sealed. Ask anyway.']));
+  await Voice.say(Dialogue.next('WAKE'));
 }, { once: false });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) Audio_.resume(); });
 

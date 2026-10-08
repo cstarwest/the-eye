@@ -43,12 +43,14 @@ async function launch(name, extra = [], more = {}) {
 
 // Plays whichever game is running, competently but legally: the paddle games by moving
 // the player (the state is live) away from whatever would hit it soonest, the sigil by
-// pressing the arrows the sequence asks for.
-async function autopilot(page, ms) {
+// pressing the arrows the sequence asks for, the lock by timing real keyboard/touch
+// presses against the needle (never changing its position or forcing its result).
+async function autopilot(page, ms, untilDone = false) {
   const t0 = Date.now();
   let lastKey = null;
   while (Date.now() - t0 < ms) {
-    const key = await page.evaluate(() => {
+    const key = await page.evaluate(untilDone => {
+      if (untilDone && window.__gameDone) return { done: true };
       const s = GK.arena.current(); if (!s || s._endAt) return null;
       const W = 160, at = x => Math.max(0, Math.min(W - 8, x));
       if (s.balls) {
@@ -79,9 +81,18 @@ async function autopilot(page, ms) {
         s.x = best;
       }
       else if (s.seq && s.phase === 'input') return { id: s.round * 100 + s.i, key: ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'][s.seq[s.i]] };
+      else if (s.tumblers && s.phase === 'sweep') {
+        const slot = s.tumblers[s.row];
+        if (Math.abs(Math.round(s.needle) - slot.target) < slot.width / 2 - 4) return { id: `lock-${s.row}`, key: 'Space', touch: s.row === 1 };
+      }
       return null;
-    });
-    if (key && !(lastKey && lastKey.id === key.id && Date.now() - lastKey.at < 300)) { lastKey = { id: key.id, at: Date.now() }; await page.keyboard.press(key.key); }   // never the same rune twice before a frame has read it
+    }, untilDone);
+    if (key?.done) return;
+    if (key && !(lastKey && lastKey.id === key.id && Date.now() - lastKey.at < 300)) {
+      lastKey = { id: key.id, at: Date.now() };
+      if (key.touch) { const box = await page.locator('#gc').boundingBox(); await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2); }
+      else await page.keyboard.press(key.key);
+    }   // never the same rune / tumbler twice before a frame has read it
     await sleep(40);
   }
 }
@@ -126,8 +137,15 @@ async function autopilot(page, ms) {
   console.log('skill:', JSON.stringify(skill2));
   // every game, at tier 2, under the autopilot for a moment (a trial is only a handful of seconds): no errors, and each one plays
   for (const name of await page.evaluate(() => GK.arena.GAMES.map(g => g.name))) {
-    await page.evaluate(n => { window.__game = GK.arena.run(GK.arena.byName(n), 1); }, name);
+    await page.evaluate(n => { window.__gameDone = false; window.__game = GK.arena.run(GK.arena.byName(n), 1).then(won => { window.__gameDone = true; return won; }); }, name);
     await page.waitForSelector('#stage.on', { timeout: 5000 });
+    if (name === 'PICK THE LOCK') {
+      await autopilot(page, 13000, true);
+      const won = await page.evaluate(() => window.__game);
+      console.log('natural keyboard/touch win:', name, '->', won);
+      if (won !== true) fail('lock timing autopilot did not earn a natural win');
+      continue;
+    }
     await page.keyboard.down('Space');
     await autopilot(page, 4000);
     await page.keyboard.up('Space');
@@ -145,6 +163,18 @@ async function autopilot(page, ms) {
     }
     if (won !== true) fail(name + ' did not resolve as a win when ended');
   }
+
+  // The new timing trial also loses honestly after two mistimed Space presses.
+  // Wait until the needle is clearly outside its slot; do not change its state.
+  await page.evaluate(() => { window.__game = GK.arena.run(GK.arena.byName('lock'), 0); });
+  for (let strike = 0; strike < 2; strike++) {
+    await page.waitForFunction(wanted => {
+      const s = GK.arena.current();
+      return s?.tumblers && !s._endAt && s.strikes === wanted && s.phase === 'sweep' && Math.abs(Math.round(s.needle) - s.tumblers[s.row].target) > s.tumblers[s.row].width / 2 + 12;
+    }, strike, { timeout: 5000 });
+    await page.keyboard.press('Space');
+  }
+  if (await page.evaluate(() => window.__game) !== false) fail('lock did not jam after two real mistimed inputs');
 
   // the slowest frame the arena allows (dt .05), from every starting offset: nothing passes through anything
   const slow = await page.evaluate(() => {

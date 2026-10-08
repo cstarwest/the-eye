@@ -117,7 +117,7 @@ test('page: every script index.html loads exists, parses, and is loaded in depen
   const order = scripts.map(s => s.replace(/^web\/js\//, '').replace(/\.js$/, ''));
   const before = (a, b) => assert.ok(order.indexOf(a) < order.indexOf(b), `${a} must load before ${b}`);
   before('config', 'audio'); before('audio', 'voice'); before('voice', 'eye'); before('eye', 'arena');
-  for (const g of ['games/bricks', 'games/shmup', 'games/dodge', 'games/sigil']) before('arena', g);
+  for (const g of ['games/bricks', 'games/shmup', 'games/dodge', 'games/sigil', 'games/lock']) before('arena', g);
   before('backend', 'gate'); before('gate', 'setup'); before('gate', 'switch'); before('switch', 'main'); before('setup', 'input');
   assert.equal(order[order.length - 1], 'main');
 });
