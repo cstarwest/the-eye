@@ -53,6 +53,7 @@ An app opened from the Dock, the Start menu or a desktop launcher does not inher
 1. `CLAUDE_BIN` (or `"claudeBin"` in the settings file), when set
 2. `claude` on PATH (on Windows `claude.exe`, then `claude.cmd`)
 3. the usual install locations: `~/.local/bin` (the native installer), `~/.claude/local`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`; on Windows `%USERPROFILE%\.local\bin\claude.exe` and `%APPDATA%\npm\claude.cmd`
+4. the copy the Claude desktop app keeps for itself (`%APPDATA%\Claude\claude-code\<version>\…\claude.exe` on Windows, or under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\` for the Microsoft Store build; `~/Library/Application Support/Claude/claude-code/…` on macOS), newest version first
 
 The first one that answers `--version` is used. On Windows, an npm `claude.cmd` shim is followed to the `claude.exe` (or `cli.js`) it starts, so the question is never passed through a shell.
 
