@@ -2,13 +2,15 @@
 
 A full-screen, dark, red eye guards a Claude session. Ask it something; it taunts you in a deep, distorted voice, drops you into a one-bit pixel game under a dark synth drone and a driving beat, and only answers if you win. A trial is a handful of seconds, enough for a few meaningful moves, and each game remembers how often you have beaten it and tightens a little every time. When it answers, it is really reading your repository: through Claude Code or the Claude API, with MCP servers if you have them.
 
-It is a desktop app (Electron) for macOS, Windows and Linux. If Claude Code is installed on the same machine, the app finds it and answers through it, with nothing to configure and nothing served: no port, no browser, no web page. The window is plain HTML, CSS and scripts with no build step, no audio file and no image: the eye, the voice layer, the music and the games are all generated in it. The bridge to Claude runs in the app's main process and the window reaches it only through a small IPC surface.
+It is a desktop app (Electron) for macOS, Windows and Linux. If Claude Code is installed on the same machine, the app finds it and answers through it, with a supported current installation and no local server: no port, no browser, no web page. The window is plain HTML, CSS and scripts with no build step, no audio file and no image: the eye, the voice layer, the music and the games are all generated in it. The bridge to Claude runs in the app's main process and the window reaches it only through a small IPC surface.
+
+**Before choosing a repository:** read [Security and privacy](SECURITY.md) for provider disclosure, tool restrictions, MCP authority and remaining risks.
 
 Somewhere on the page there is a panel that was not meant to be opened.
 
 ## Quick start
 
-Double-click the launcher for your system, at the top of this folder (it needs [Node.js](https://nodejs.org) 20 or newer):
+Double-click the launcher for your system, at the top of this folder (it needs [Node.js](https://nodejs.org) 22.12 or newer):
 
 | | |
 |---|---|
@@ -30,9 +32,9 @@ The app reads this checkout unless you choose another repository.
 
 ### Closing it
 
-Closing the window quits the app, on every platform (on macOS too, where apps usually linger in the Dock). Quitting stops everything the app started before it exits: the question in progress is cancelled, Claude Code is stopped together with whatever it started (its tools, its MCP servers), the MCP servers the API oracle started are closed, and any git or ripgrep search still running is ended. Each of those runs in its own process group (on Windows, its own process tree), so stopping one stops its children too; what has not stopped two seconds after being asked is killed.
+Closing the window quits the app, on every platform (on macOS too, where apps usually linger in the Dock). Quitting requests cleanup of work the app started before it exits: the question in progress is cancelled, Claude Code and its tracked process group are signalled, the MCP servers the API oracle started are closed, and any git or ripgrep search still running is ended. App-tracked children use process groups (process trees on Windows); MCP SDK clients close separately. Cleanup is best effort, especially after abnormal termination or detached descendants; see [the limits](SECURITY.md#cancellation-and-process-cleanup).
 
-Tap once to wake the eye. With Claude Code installed and signed in (`claude` has been run once in a terminal), the gear's dot is lit and the answers come from Claude Code reading your repository. Without it, a mock answers in character and the games still work.
+Tap once to wake the eye. With Claude Code 2.1.248 or newer installed and signed in (`claude` has been run once in a terminal), the gear's dot is lit and the answers come from Claude Code reading your repository. Without it, a mock answers in character and the games still work.
 
 To build an installable app (a `.dmg`, an NSIS installer or an AppImage, for the platform you build on):
 
@@ -55,7 +57,7 @@ An app opened from the Dock, the Start menu or a desktop launcher does not inher
 3. the usual install locations: `~/.local/bin` (the native installer), `~/.claude/local`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`; on Windows `%USERPROFILE%\.local\bin\claude.exe` and `%APPDATA%\npm\claude.cmd`
 4. the copy the Claude desktop app keeps for itself (`%APPDATA%\Claude\claude-code\<version>\…\claude.exe` on Windows, or under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\` for the Microsoft Store build; `~/Library/Application Support/Claude/claude-code/…` on macOS), newest version first
 
-The first one that answers `--version` is used. On Windows, an npm `claude.cmd` shim is followed to the `claude.exe` (or `cli.js`) it starts, so the question is never passed through a shell.
+Repository-local, relative and empty PATH candidates are excluded. Discovery probes run with isolated working/config directories and without credentials. The first candidate that answers `--version` is selected; answering additionally requires a current CLI supporting restricted configuration and tool flags. On Windows, an npm `claude.cmd` shim is followed to the `claude.exe` (or `cli.js`) it starts, so the question is never passed through a shell.
 
 ## The oracles
 
@@ -63,7 +65,7 @@ The bridge answers through one of three oracles. It picks one automatically, or 
 
 | Oracle | What answers | Needs |
 |---|---|---|
-| `claude-code` | `claude -p` running headlessly in your repository, with its own tools (Read, Glob, Grep, read-only git), resumed between questions so it remembers the conversation | [Claude Code](https://claude.ai/code) installed and logged in |
+| `claude-code` | `claude -p` from an isolated working directory, with only the app’s restricted repository MCP tools, resumed between questions | [Claude Code](https://claude.ai/code) installed and logged in |
 | `api` | The Claude API (`claude-opus-5-5`, streaming, adaptive thinking, server-side refusal fallback) with built-in read-only repository tools and your MCP servers | `ANTHROPIC_API_KEY`, or `ant auth login` |
 | `mock` | Canned answers, no model | nothing |
 
@@ -87,8 +89,8 @@ The app keeps a settings file in its user-data folder (File → Open Settings Fi
 | `mcpConfig` | `MCP_CONFIG` | `mcp.json` in the user-data folder, if present | MCP servers (see below) |
 | `compact` | `COMPACT=1` | off | `api` only: server-side compaction of long conversations instead of starting over |
 | `claudeBin` | `CLAUDE_BIN` | found (see above) | path to the Claude Code CLI |
-| `claudeTools` | `CLAUDE_TOOLS` | `Read Glob Grep Bash(git log:*) …` | `claude-code` only: `--allowedTools` list |
-| `permissionMode` | `CLAUDE_PERMISSION_MODE` | unset | `claude-code` only: passed as `--permission-mode` |
+| `claudeTools` | `CLAUDE_TOOLS` | fixed app-owned repository tools | Custom overrides are refused by the hardened Claude Code oracle |
+| `permissionMode` | `CLAUDE_PERMISSION_MODE` | `dontAsk` | Permission overrides are refused; only exact repository MCP tools are pre-approved |
 | `timeoutMs` | `TIMEOUT_MS` | `300000` | `claude-code` only: per-question limit |
 
 `GATEKEEPER_SHELL_ENV=0` skips reading the login shell's environment; `GATEKEEPER_USER_DATA` moves the user-data folder (the tests use both).
@@ -97,8 +99,8 @@ The app keeps a settings file in its user-data folder (File → Open Settings Fi
 
 Put an `mcp.json` in the app's user-data folder (or point `mcpConfig` / `MCP_CONFIG` at one) in the format Claude Desktop and Claude Code use; `mcp.example.json` shows it.
 
-- `claude-code`: the file is passed straight to Claude Code with `--mcp-config`, and its tools are used as usual. Claude Code also loads the repository's own `.mcp.json` and your user-level MCP servers by itself.
-- `api`: servers with a `command` are started by the app over stdio (MCP SDK) and their tools are offered to Claude alongside the repository tools; servers with a `url` are handed to the API's MCP connector, which connects to them server-side.
+- `claude-code`: only the app-owned repository MCP is supported. External `mcpConfig`, repository `.mcp.json` and custom tool/permission overrides are refused or excluded. Normal subscription authentication is retained. Update Claude Code if the app reports missing security capabilities.
+- `api`: each server requires an exact `allowedTools` array before it is connected. Only those names are exposed; new tools remain disabled. Granting a tool allows unattended calls and can permit writes or disclosure. Stdio servers run with your OS privileges; remote servers connect through the API. Review [MCP authority](SECURITY.md#external-mcp-authority) first.
 
 ### How the window talks to the bridge
 
@@ -161,14 +163,14 @@ xvfb-run -a npm run test:e2e   # the same on a Linux machine without a display
   A console handle `GK` exposes the pieces: `GK.gate('…')`, `GK.eye.setMood('angry')`, `GK.arena.end(true)`, `GK.arena.run(GK.arena.byName('sigil'), 2)`, `GK.arena.current()`, `GK.arena.skill()`, `GK.arena.forget()`, `GK.bridge.auto()`, `GK.bridge.chooseRepo()`, `GK.setup.show(true)`, `GK.switch.state()`, `GK.switch.hold(ms)` (how long friendly lasts), `GK.switch.corrupt()`. Each game's tier is kept in `localStorage` under `gatekeeper.skill`.
 - `Gatekeeper.command`, `Gatekeeper.cmd`, `gatekeeper.sh` — the double-click launchers; each finds Node and runs `desktop/launch.mjs`.
 - `desktop/launch.mjs` — installs dependencies when needed, starts the app, and ties the two together: either one closing closes the other.
-- `desktop/main.mjs` — the Electron main process: the window and its lockdown, the menu, the folder picker, IPC to the bridge, one instance at a time (a second launch with a folder hands it to the first), and the quit that waits for every process to stop.
+- `desktop/main.mjs` — the Electron main process: the window and its lockdown, the menu, the folder picker, IPC to the bridge, one instance at a time (a second launch with a folder hands it to the first), and the quit that attempts tracked-process cleanup.
 - `desktop/processes.mjs` — every process the app starts goes through here, in its own process group, so quitting can stop each one with everything under it.
 - `desktop/preload.cjs` — `window.gatekeeper`, the window's only way out.
 - `desktop/bridge.mjs` — picks the oracle, keeps the repository and the settings file, answers and cancels questions. Plain Node, so the tests drive it without Electron.
 - `desktop/find-claude.mjs` — finds Claude Code: the login shell's PATH, the install locations, Windows shims.
 - `desktop/oracle-claude-code.mjs` — spawns `claude -p … --output-format stream-json`, streams deltas and tool activity, resumes sessions.
 - `desktop/oracle-api.mjs` — Anthropic SDK streaming tool-use loop; validates tool inputs, handles `refusal` / `pause_turn` / `max_tokens`, maps API errors to in-character messages. Starts over when a conversation outgrows its budget, or compacts with `COMPACT=1`.
-- `desktop/repo-tools.mjs` — `repo_list`, `repo_read`, `repo_search` (ripgrep when available), `repo_git` (allowlisted). Paths are confined to the repository, secrets are withheld.
+- `desktop/repo-tools.mjs` — `repo_list`, `repo_read`, `repo_search` (ripgrep when available), `repo_git` (fixed metadata operations). Paths and common secret filenames are filtered. Gitfiles/linked worktrees and redirected Git metadata are unsupported; see SECURITY.md for limits.
 - `desktop/mcp.mjs` — loads `mcp.json`; stdio servers through the MCP SDK, remote ones through the API connector.
 - `desktop/persona.mjs` — the voice the oracles answer in.
 

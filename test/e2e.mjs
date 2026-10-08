@@ -4,9 +4,13 @@
 //   3. closing the window mid-answer quits the app and stops Claude Code and what it started
 //   4. the launcher: it starts the app, exits with it, and takes it down when it is stopped
 // On a Linux machine without a display, run it under xvfb-run:   xvfb-run -a npm run test:e2e
+import { runtimeError } from '../desktop/security.mjs';
+const unsafeRuntime = runtimeError();
+if (unsafeRuntime) throw new Error(unsafeRuntime);
+
 import { _electron as electron } from 'playwright';
 import electronPath from 'electron';
-import { mkdir, mkdtemp, symlink, chmod, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, chmod, readFile, copyFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, delimiter } from 'node:path';
@@ -27,7 +31,7 @@ async function launch(name, extra = [], more = {}) {
   Object.assign(env, { HOME: join(base, 'home'), GATEKEEPER_USER_DATA: join(base, 'user-data'), GATEKEEPER_SHELL_ENV: '0', PATH: [...extra, nodeDir, '/usr/bin', '/bin'].join(delimiter) });
   Object.assign(env, more);
   await mkdir(env.HOME);
-  const args = [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), '--autoplay-policy=no-user-gesture-required', root];
+  const args = ['--autoplay-policy=no-user-gesture-required', root];
   const app = await electron.launch({ executablePath: electronPath, args, env, cwd: root });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1280, height: 800 }).catch(() => {});
@@ -244,8 +248,7 @@ async function autopilot(page, ms) {
 // 2. Claude Code installed: nothing to configure, the app finds it, links, and answers through it
 {
   const binDir = await mkdtemp(join(tmpdir(), 'gk-e2e-bin-'));
-  const fake = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(fake, 0o755);
-  await symlink(fake, join(binDir, 'claude'));
+  await copyFile(join(here, 'fixtures', 'fake-claude.mjs'), join(binDir, 'claude')); await chmod(join(binDir, 'claude'), 0o755);
   const { app, page } = await launch('claude', [binDir]);
   await page.click('#wake'); await sleep(2800);
   await page.click('#setup-btn'); await page.waitForSelector('#setup.on', { timeout: 3000 });
@@ -273,12 +276,12 @@ async function autopilot(page, ms) {
 
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (fn, ms) => { const t0 = Date.now(); while (!(await fn()) && Date.now() - t0 < ms) await sleep(100); return fn(); };
-const fakeBin = async () => { const d = await mkdtemp(join(tmpdir(), 'gk-e2e-bin-')); const f = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(f, 0o755); await symlink(f, join(d, 'claude')); return d; };
+const fakeBin = async config => { const d = await mkdtemp(join(tmpdir(), 'gk-e2e-bin-')); const f = join(d, 'claude'); await copyFile(join(here, 'fixtures', 'fake-claude.mjs'), f); await chmod(f, 0o755); await writeFile(join(d, 'fake-claude.config.json'), JSON.stringify(config || {})); return d; };
 
 // 3. a question in progress, then the window is closed: the app quits, and claude and its child go with it
 {
   const pidsFile = join(await mkdtemp(join(tmpdir(), 'gk-e2e-pids-')), 'pids.log');
-  const { app, page } = await launch('close', [await fakeBin()], { FAKE_CLAUDE_PIDS: pidsFile });
+  const { app, page } = await launch('close', [await fakeBin({ pids: pidsFile })]);
   const appPid = app.process().pid;
   await page.click('#wake'); await sleep(1500);
   page.evaluate(() => GK.askClaude('HANG on this').catch(() => {})).catch(() => {});   // it never answers; it ends when the window does

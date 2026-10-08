@@ -1,15 +1,24 @@
 // node --test test/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, readFile, chmod, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, readFile, chmod, rm, symlink, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const collect = () => { const events = []; return { events, emit: e => events.push(e), text: () => events.filter(e => e.type === 'delta').map(e => e.text).join(''), labels: () => events.filter(e => e.type === 'tool').map(e => e.label) }; };
+
+async function fakeClaude(config = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'gk-fake-bin-'));
+  const bin = join(dir, 'fake-claude.mjs');
+  await copyFile(join(here, 'fixtures', 'fake-claude.mjs'), bin);
+  await chmod(bin, 0o755);
+  await writeFile(join(dir, 'fake-claude.config.json'), JSON.stringify(config));
+  return bin;
+}
 
 async function tempRepo() {
   const dir = await mkdtemp(join(tmpdir(), 'gk-'));
@@ -42,9 +51,8 @@ test('repo tools: list, read, search, git; paths and secrets are guarded', async
 
 test('claude-code oracle: streams deltas and tool labels, resumes the session, surfaces failures', async () => {
   const { createClaudeCodeOracle } = await import('../desktop/oracle-claude-code.mjs');
-  const bin = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(bin, 0o755);
   const log = join(await mkdtemp(join(tmpdir(), 'gk-')), 'args.log');
-  process.env.FAKE_CLAUDE_LOG = log;
+  const bin = await fakeClaude({ log });
   const oracle = createClaudeCodeOracle({ claudeBin: bin, repo: root, maxTurns: 3 });
   const c1 = collect();
   const r1 = await oracle.ask({ question: 'where is the answer?', session: 's1', emit: c1.emit });
@@ -67,7 +75,7 @@ test('api oracle: tool-use loop over the Messages API with streaming, repo tools
   const api = await startMockAnthropic();
   process.env.ANTHROPIC_BASE_URL = api.url; process.env.ANTHROPIC_API_KEY = 'test-key';
   const mcpConfig = join(await mkdtemp(join(tmpdir(), 'gk-')), 'mcp.json');
-  await writeFile(mcpConfig, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [join(here, 'fixtures', 'mcp-echo.mjs')] } } }));
+  await writeFile(mcpConfig, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [join(here, 'fixtures', 'mcp-echo.mjs')], allowedTools: ['echo'] } } }));
   const { createApiOracle } = await import('../desktop/oracle-api.mjs');
   const logs = [];
   const oracle = await createApiOracle({ repo: root, mcpConfig, maxTurns: 4 }, m => logs.push(m));
@@ -117,7 +125,7 @@ test('page: every script index.html loads exists, parses, and is loaded in depen
 // a folder with `claude` in it (the fake CLI), as an installer would leave it
 async function claudeIn(dir) {
   await mkdir(dir, { recursive: true });
-  const bin = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(bin, 0o755);
+  const bin = await fakeClaude();
   await symlink(bin, join(dir, 'claude'));
   return join(dir, 'claude');
 }
@@ -172,10 +180,10 @@ test('find-claude: the login shell\'s PATH and ANTHROPIC_* are adopted, without 
 
 test('bridge: picks Claude Code when it is found, streams answers, remembers the repository', async () => {
   const { createBridge } = await import('../desktop/bridge.mjs');
-  const bin = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(bin, 0o755);
+  const bin = await fakeClaude();
   const find = () => ({ path: bin, command: bin, args: [], version: '9.9.9' });
   const dir = await mkdtemp(join(tmpdir(), 'gk-bridge-')), settingsFile = join(dir, 'settings.json'), repo = await tempRepo(), other = await tempRepo();
-  const b = await createBridge({ settingsFile, env: {}, defaultRepo: repo, find });
+  const b = await createBridge({ settingsFile, env: { PATH: process.env.PATH }, defaultRepo: repo, find });
   let st = b.status();
   assert.equal(st.oracle, 'claude-code'); assert.equal(st.linked, true); assert.equal(st.needsRepo, false);
   assert.equal(st.repoPath, repo); assert.equal(st.claude.version, '9.9.9'); assert.match(st.note, /Claude Code 9\.9\.9/);
@@ -193,7 +201,7 @@ test('bridge: picks Claude Code when it is found, streams answers, remembers the
   assert.equal(st.repoPath, other);
   assert.equal(JSON.parse(await readFile(settingsFile, 'utf8')).repo, other);
   await assert.rejects(b.setRepo(join(other, 'nope')), /not a folder/);
-  const again = await createBridge({ settingsFile, env: {}, defaultRepo: repo, find });
+  const again = await createBridge({ settingsFile, env: { PATH: process.env.PATH }, defaultRepo: repo, find });
   assert.equal(again.status().repoPath, other);
   await b.close(); await again.close();
   for (const d of [dir, repo, other]) await rm(d, { recursive: true, force: true });
@@ -201,14 +209,14 @@ test('bridge: picks Claude Code when it is found, streams answers, remembers the
 
 test('bridge: without a repository it asks for one; without Claude it falls back to the mock; a cancelled question stops', async () => {
   const { createBridge } = await import('../desktop/bridge.mjs');
-  const bin = join(here, 'fixtures', 'fake-claude.mjs');
+  const bin = await fakeClaude();
   const found = () => ({ path: bin, command: bin, args: [], version: '9.9.9' });
   const dir = await mkdtemp(join(tmpdir(), 'gk-bridge-'));
-  const noRepo = await createBridge({ settingsFile: join(dir, 'a.json'), env: {}, find: found });
+  const noRepo = await createBridge({ settingsFile: join(dir, 'a.json'), env: { PATH: process.env.PATH }, find: found });
   assert.deepEqual([noRepo.status().oracle, noRepo.status().needsRepo, noRepo.status().ready], ['claude-code', true, false]);
   await assert.rejects(noRepo.ask({ id: 'x', question: 'hello?', session: 's' }), /choose a repository/);
   const st = await noRepo.setRepo(root);
-  assert.deepEqual([st.needsRepo, st.linked, st.repo], [false, true, 'the-eye']);
+  assert.deepEqual([st.needsRepo, st.linked, st.repo], [false, true, basename(root)]);
   // no Claude Code, no API key: the mock answers, and says why
   const none = () => null;
   const mock = await createBridge({ settingsFile: join(dir, 'b.json'), env: {}, find: none });
@@ -260,8 +268,8 @@ test('processes: stopAll ends every tracked tree, grandchildren too, even one th
 
 test('claude-code oracle: a cancelled question stops claude and everything it started', { skip: !posix }, async () => {
   const { createClaudeCodeOracle } = await import('../desktop/oracle-claude-code.mjs');
-  const bin = join(here, 'fixtures', 'fake-claude.mjs'); await chmod(bin, 0o755);
-  const file = join(await mkdtemp(join(tmpdir(), 'gk-')), 'pids.log'); process.env.FAKE_CLAUDE_PIDS = file;
+  const file = join(await mkdtemp(join(tmpdir(), 'gk-')), 'pids.log');
+  const bin = await fakeClaude({ pids: file });
   const oracle = createClaudeCodeOracle({ claudeBin: bin, repo: root });
   const ac = new AbortController();
   const pending = oracle.ask({ question: 'HANG please', session: 'h', emit: () => {}, signal: ac.signal });
