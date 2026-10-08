@@ -17,7 +17,7 @@ export async function createApiOracle(cfg, log = () => {}) {
   const local = [...repoTools(cfg.repo), ...mcp.localTools];
   const byName = new Map(local.map(t => [t.name, t]));
   const toolDefs = local.map(t => ({ name: t.name, description: t.description, input_schema: t.input_schema, eager_input_streaming: true }));
-  const toolsets = mcp.remoteServers.map(s => ({ type: 'mcp_toolset', mcp_server_name: s.name }));
+  const toolsets = mcp.remoteToolsets;
   const betas = ['server-side-fallback-2026-07-01'];
   if (mcp.remoteServers.length) betas.push('mcp-client-2025-11-20');
   if (cfg.compact) betas.push('compact-2026-01-12');
@@ -98,7 +98,9 @@ function validate(schema, input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return 'input is not an object';
   for (const k of schema?.required || []) if (!(k in input)) return `missing ${k}`;
   for (const [k, v] of Object.entries(input)) {
-    const p = schema?.properties?.[k]; if (!p || !p.type || v === null || v === undefined) continue;
+    const p = schema?.properties?.[k];
+    if (!p && schema?.additionalProperties === false) return `unexpected ${k}`;
+    if (!p || !p.type) continue;
     const t = Array.isArray(p.type) ? p.type : [p.type];
     const ok = t.some(x => x === 'integer' ? Number.isInteger(v) : x === 'number' ? typeof v === 'number' : x === 'array' ? Array.isArray(v) : x === 'object' ? typeof v === 'object' : x === 'null' ? v === null : typeof v === x);
     if (!ok) return `${k} should be ${t.join('|')}`;

@@ -33,7 +33,7 @@ export async function createBridge({ settingsFile, env = process.env, repo: laun
   const running = new Map();   // ask id -> { ac, session }
 
   const cfg = () => ({
-    repo,
+    repo, env,
     model: env.MODEL || settings.model || '',
     effort: env.EFFORT || settings.effort || '',
     maxTurns: Number(env.MAX_TURNS || settings.maxTurns) || 12,
@@ -49,7 +49,7 @@ export async function createBridge({ settingsFile, env = process.env, repo: laun
     cancelAll();
     await oracle?.close?.(); oracle = null; note = '';
     const tried = [];
-    claude = await find({ env, bin: env.CLAUDE_BIN || settings.claudeBin, tried });
+    claude = await find({ env, bin: env.CLAUDE_BIN || settings.claudeBin, tried, repo });
     const want = String(env.ORACLE || settings.oracle || 'auto').toLowerCase();
     kind = want === 'cli' ? 'claude-code' : want !== 'auto' ? want
       : claude ? 'claude-code'

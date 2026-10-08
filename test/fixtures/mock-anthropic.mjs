@@ -3,7 +3,7 @@
 // Records every request body and header so tests can assert on them.
 import { createServer } from 'node:http';
 
-export function startMockAnthropic() {
+export function startMockAnthropic({ tool = { name: 'repo_read', input: { path: 'package.json', start: 1, end: 5 } } } = {}) {
   const requests = [];
   const sse = (res, type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
   const chunk = s => s.match(/.{1,7}/gs) || [];
@@ -25,7 +25,7 @@ export function startMockAnthropic() {
     const body = JSON.parse(raw); requests.push({ headers: req.headers, body });
     const last = body.messages[body.messages.length - 1];
     const toolResults = Array.isArray(last.content) ? last.content.filter(b => b.type === 'tool_result') : [];
-    if (!toolResults.length) return stream(res, body.model, [{ type: 'tool_use', id: 'toolu_mock_1', name: 'repo_read', input: { path: 'package.json', start: 1, end: 5 } }], 'tool_use');
+    if (!toolResults.length) return stream(res, body.model, [{ type: 'tool_use', id: 'toolu_mock_1', ...tool }], 'tool_use');
     const seen = String(toolResults[0].content).includes('"name"') ? 'I read package.json.' : 'I could not read it.';
     return stream(res, body.model, [{ type: 'text', text: `${seen} The package is named gatekeeper-eye. Ask again, and ask better.` }], 'end_turn');
   });
