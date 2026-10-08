@@ -8,7 +8,7 @@
 //                     that answers --version, or null (pass `tried: []` to
 //                     collect why each candidate was passed over)
 import { spawnTracked, killTree } from './processes.mjs';
-import { existsSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, isAbsolute } from 'node:path';
 
@@ -60,17 +60,44 @@ export async function adoptLoginShellEnv(env = process.env, opts = {}) {
 }
 
 const isFile = p => { try { return statSync(p).isFile(); } catch { return false; } };
+const dirs = p => { try { return readdirSync(p, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name); } catch { return []; } };
+const newerFirst = (a, b) => {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] || 0) !== (x[i] || 0)) return (y[i] || 0) - (x[i] || 0);
+  return 0;
+};
 
-// Where installers put it, after PATH.
+// The copy the Claude desktop app keeps for itself, under
+// <app data>/claude-code/<version>/<build>/claude, newest version first. The
+// Microsoft Store build is an MSIX package, so Windows keeps its %APPDATA%
+// under %LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming, where only the
+// package itself sees it at the usual path; both places are looked in.
+export function desktopAppCopies({ env = process.env, platform = process.platform, home = homedir() } = {}) {
+  let roots;
+  if (platform === 'win32') {
+    const localAppData = env.LOCALAPPDATA || join(home, 'AppData', 'Local'), packages = join(localAppData, 'Packages');
+    roots = [join(env.APPDATA || join(home, 'AppData', 'Roaming'), 'Claude', 'claude-code'),
+      ...dirs(packages).filter(d => /^Claude_/i.test(d)).map(d => join(packages, d, 'LocalCache', 'Roaming', 'Claude', 'claude-code'))];
+  } else roots = [platform === 'darwin' ? join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
+    : join(env.XDG_CONFIG_HOME || join(home, '.config'), 'Claude', 'claude-code')];
+  const exe = platform === 'win32' ? 'claude.exe' : 'claude';
+  return roots.flatMap(root => dirs(root).filter(v => /^\d+(\.\d+)*$/.test(v)).map(v => ({ v, dir: join(root, v) })))
+    .sort((a, b) => newerFirst(a.v, b.v))
+    .flatMap(({ dir }) => dirs(dir).map(b => join(dir, b, exe)).filter(isFile));
+}
+
+// Where installers put it, after PATH; the desktop app's own copy last.
 export function knownLocations({ env = process.env, platform = process.platform, home = homedir() } = {}) {
+  const app = desktopAppCopies({ env, platform, home });
   if (platform === 'win32') {
     const appData = env.APPDATA || join(home, 'AppData', 'Roaming');
-    return [join(home, '.local', 'bin', 'claude.exe'), join(appData, 'npm', 'claude.cmd'), join(home, '.claude', 'local', 'claude.exe')];
+    return [join(home, '.local', 'bin', 'claude.exe'), join(appData, 'npm', 'claude.cmd'), join(home, '.claude', 'local', 'claude.exe'), ...app];
   }
   return [
     join(home, '.local', 'bin', 'claude'), join(home, '.claude', 'local', 'claude'),
     '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude',
     join(home, '.npm-global', 'bin', 'claude'), join(home, '.bun', 'bin', 'claude'), join(home, '.volta', 'bin', 'claude'),
+    ...app,
   ];
 }
 
